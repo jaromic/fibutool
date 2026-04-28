@@ -1,0 +1,4 @@
+pdfplumber>=0.11
+pypdf>=4.0
+anthropic>=0.50
+pyyaml>=6.0
