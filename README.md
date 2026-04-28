@@ -38,7 +38,11 @@ fibutool is a CLI bookkeeping tool that processes bank payment receipts and invo
     python main.py --last-receipt-number 42 \
         --payments ./payments \
         --invoices ./invoices \
-        --output .
+        --merged ./merged \
+        --journal ./journal.csv
+
+    # --journal accepts a directory (journal.csv placed inside) or a full file path
+    python main.py --last-receipt-number 42 --journal /archive/2024/bookkeeping.csv
 
 ## folder layout
 

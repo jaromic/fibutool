@@ -32,8 +32,12 @@ def main() -> None:
         help="Folder with invoice PDFs (default: ./invoices)",
     )
     parser.add_argument(
-        "--output", type=Path, default=Path("."),
-        help="Output base directory (default: current directory)",
+        "--merged", type=Path, default=Path("merged"),
+        help="Directory for merged invoice+payment PDFs (default: ./merged)",
+    )
+    parser.add_argument(
+        "--journal", type=Path, default=Path("."),
+        help="Journal output: directory (journal.csv placed inside) or full file path (default: ./journal.csv)",
     )
     parser.add_argument(
         "--config", type=Path, default=Path("config.yaml"),
@@ -46,8 +50,9 @@ def main() -> None:
     api_key: str = config.get("anthropic_api_key") or ""
     client = anthropic.Anthropic(api_key=api_key or None)
 
-    payments_ordered_dir = args.output / "payments-ordered"
-    merged_dir = args.output / "merged"
+    payments_ordered_dir = Path("payments-ordered")
+    merged_dir = args.merged
+    csv_path = args.journal / "journal.csv" if not args.journal.suffix else args.journal
 
     payment_pdfs = sorted(p for p in args.payments.glob("*.pdf"))
     invoice_pdfs = sorted(p for p in args.invoices.glob("*.pdf"))
@@ -103,7 +108,6 @@ def main() -> None:
             print(f"  {out.name}  ⚠  no invoice matched")
 
     # ── Step 4: CSV journal ──────────────────────────────────────────────────
-    csv_path = args.output / "journal.csv"
     generate_csv(results, csv_path)
     print(f"\nStep 4: Journal written → {csv_path}")
 
