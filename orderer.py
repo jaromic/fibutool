@@ -9,10 +9,6 @@ def order_payments(
     last_receipt_number: int,
     payments: list[PaymentInfo],
 ) -> list[PaymentInfo]:
-    if payments_ordered_dir.exists():
-        shutil.rmtree(payments_ordered_dir)
-    payments_ordered_dir.mkdir(parents=True)
-
     sorted_payments = sorted(payments, key=lambda p: (p.booking_date, p.pdf_path.name))
 
     receipt_num = last_receipt_number + 1

@@ -1,4 +1,5 @@
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -10,6 +11,36 @@ from journal import generate_csv
 from matcher import match_payments
 from merger import merge_pdfs
 from orderer import order_payments
+
+
+def _preflight(merged_dir: Path, payments_ordered_dir: Path, csv_path: Path, clean: bool) -> None:
+    output_dirs = [merged_dir, payments_ordered_dir]
+
+    missing = [d for d in output_dirs if not d.exists()]
+    if not csv_path.parent.exists():
+        missing.append(csv_path.parent)
+    if missing:
+        for d in missing:
+            print(f"Error: output directory does not exist: {d}", file=sys.stderr)
+        sys.exit(1)
+
+    if clean:
+        for d in output_dirs:
+            for item in d.iterdir():
+                item.unlink() if item.is_file() else shutil.rmtree(item)
+        if csv_path.exists():
+            csv_path.unlink()
+        return
+
+    conflicts = [str(d) for d in output_dirs if any(d.iterdir())]
+    if csv_path.exists():
+        conflicts.append(str(csv_path))
+    if conflicts:
+        print("Error: output from a previous run already exists:", file=sys.stderr)
+        for c in conflicts:
+            print(f"  {c}", file=sys.stderr)
+        print("Use --clean to remove existing output before running.", file=sys.stderr)
+        sys.exit(1)
 
 
 def load_config(config_path: Path) -> dict:
@@ -43,16 +74,22 @@ def main() -> None:
         "--config", type=Path, default=Path("config.yaml"),
         help="Config file (default: ./config.yaml)",
     )
+    parser.add_argument(
+        "--clean", action="store_true",
+        help="Remove existing output files before running",
+    )
     args = parser.parse_args()
+
+    payments_ordered_dir = Path("payments-ordered")
+    merged_dir = args.merged
+    csv_path = args.journal / "journal.csv" if not args.journal.suffix else args.journal
+
+    _preflight(merged_dir, payments_ordered_dir, csv_path, args.clean)
 
     config = load_config(args.config)
     own_company_names: list[str] = config.get("own_company_names", [])
     api_key: str = config.get("anthropic_api_key") or ""
     client = anthropic.Anthropic(api_key=api_key or None)
-
-    payments_ordered_dir = Path("payments-ordered")
-    merged_dir = args.merged
-    csv_path = args.journal / "journal.csv" if not args.journal.suffix else args.journal
 
     payment_pdfs = sorted(p for p in args.payments.glob("*.pdf"))
     invoice_pdfs = sorted(p for p in args.invoices.glob("*.pdf"))

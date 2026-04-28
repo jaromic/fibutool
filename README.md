@@ -44,11 +44,17 @@ fibutool is a CLI bookkeeping tool that processes bank payment receipts and invo
     # --journal accepts a directory (journal.csv placed inside) or a full file path
     python main.py --last-receipt-number 42 --journal /archive/2024/bookkeeping.csv
 
+    # If output from a previous run exists, the tool will refuse and tell you to use --clean:
+    python main.py --last-receipt-number 42 --clean
+
 ## folder layout
+
+The output directories must be created before the first run. The tool refuses to run if
+they are missing or contain files from a previous run (use --clean to reset).
 
     payments/           ← input: bank payment confirmation PDFs
     invoices/           ← input: invoice PDFs (incoming and outgoing)
-    payments-ordered/   ← output: payments renamed NNN_YYYY-MM-DD_<orig>.pdf
-    merged/             ← output: merged PDFs (invoice pages first, then payment)
+    payments-ordered/   ← output: payments renamed NNN_YYYY-MM-DD_<orig>.pdf  (must exist)
+    merged/             ← output: merged PDFs (invoice pages first, then payment)  (must exist)
     journal.csv         ← output: journal rows ready for import into Excel
     config.yaml         ← own company names (Jarosoft / Michael Jaros)
