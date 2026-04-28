@@ -20,12 +20,13 @@ def _payment(amount, direction="outgoing", receipt_number=1):
     )
 
 
-def _invoice(counterparty="Supplier GmbH"):
+def _invoice(counterparty="Supplier GmbH", invoice_type="incoming_invoice"):
     return InvoiceInfo(
         invoice_date=date(2024, 1, 10),
         amount=Decimal("120.00"),
         currency="EUR",
         counterparty=counterparty,
+        invoice_type=invoice_type,
         pdf_path=Path("invoice.pdf"),
     )
 
@@ -70,6 +71,15 @@ class TestVatSplit:
 
     def test_incoming_is_einnahmen(self, tmp_path):
         result = MatchResult(payment=_payment("120.00", direction="incoming"), invoice=_invoice())
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][2] == "Einnahmen"
+
+    def test_credit_note_is_einnahmen(self, tmp_path):
+        # Credit note received → incoming payment → Einnahmen, same as outgoing invoice
+        result = MatchResult(
+            payment=_payment("120.00", direction="incoming"),
+            invoice=_invoice(invoice_type="credit_note"),
+        )
         generate_csv([result], tmp_path / "journal.csv")
         assert _read_csv(tmp_path / "journal.csv")[0][2] == "Einnahmen"
 

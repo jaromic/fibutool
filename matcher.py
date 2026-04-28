@@ -11,8 +11,9 @@ Given a list of payments and a list of invoices, return the optimal 1-to-1 assig
 Each invoice may be assigned to at most one payment; each payment gets at most one invoice.
 
 Matching criteria (in order of importance):
-1. Direction: outgoing payment (we paid) → match to incoming invoice (bill from that company);
-              incoming payment (we received) → match to outgoing invoice (we sent to that company)
+1. Direction: outgoing payment (we paid) → match to "incoming_invoice" (bill from that company);
+              incoming payment (we received) → match to "outgoing_invoice" (we sent to that company)
+                                               OR "credit_note" (Gutschrift received from that company)
 2. Company name: allow abbreviations, GmbH/Ltd/OG variants, partial name matches, minor spelling differences
 3. Amount: should match if same currency; for different currencies assess FX plausibility
 4. Date: invoice date should be 0–21 days before booking date; occasionally wider gaps are acceptable
@@ -65,6 +66,7 @@ def match_payments(
                 "index": i,
                 "filename": inv.pdf_path.name,
                 "invoice_date": inv.invoice_date.isoformat(),
+                "invoice_type": inv.invoice_type,
                 "amount": str(inv.amount),
                 "currency": inv.currency,
                 "counterparty": inv.counterparty,

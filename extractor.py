@@ -33,7 +33,11 @@ Fields:
 - invoice_date: invoice date in ISO format YYYY-MM-DD
 - amount: total amount including VAT as decimal string with dot as separator, always positive (e.g. "1234.56")
 - currency: 3-letter currency code (e.g. "EUR")
-- counterparty: the other company's name (issuer for bills we received, recipient for invoices we sent)
+- invoice_type: classify the document —
+    "incoming_invoice" if it is a bill/Rechnung addressed to us (we have to pay),
+    "outgoing_invoice" if it is an invoice we issued to someone else (they pay us),
+    "credit_note" if it is a Gutschrift/credit note sent to us by another company (we receive money)
+- counterparty: the other company's name (issuer for incoming invoices and credit notes, recipient for outgoing invoices)
 - street: street address of the counterparty, or null if not shown
 - postal_code: postal code of the counterparty, or null if not shown
 - town: town/city of the counterparty, or null if not shown
@@ -131,6 +135,7 @@ def extract_invoice_info(pdf_path: Path, client: anthropic.Anthropic) -> Invoice
         amount=_parse_amount(data["amount"]),
         currency=data["currency"].upper(),
         counterparty=data["counterparty"],
+        invoice_type=data.get("invoice_type", "incoming_invoice"),
         address=_format_address(data),
         pdf_path=pdf_path,
     )

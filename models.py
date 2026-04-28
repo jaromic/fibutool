@@ -25,6 +25,7 @@ class InvoiceInfo:
     currency: str
     counterparty: str
     pdf_path: Path
+    invoice_type: str = "incoming_invoice"  # incoming_invoice | outgoing_invoice | credit_note
     address: Optional[str] = None
     matched: bool = False
 
