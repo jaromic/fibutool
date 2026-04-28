@@ -1,10 +1,10 @@
+import base64
 import json
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import anthropic
-import pdfplumber
 
 from models import InvoiceInfo, PaymentInfo
 
@@ -32,19 +32,8 @@ Fields:
 """
 
 
-def extract_pdf_text(pdf_path: Path) -> str:
-    with pdfplumber.open(pdf_path) as pdf:
-        pages = [page.extract_text() or "" for page in pdf.pages]
-    text = "\n\n--- PAGE BREAK ---\n\n".join(p for p in pages if p.strip())
-    if not text.strip():
-        raise ValueError(
-            f"No text extracted from {pdf_path.name} — may be a scanned PDF requiring OCR"
-        )
-    return text
-
-
 def _parse_amount(raw: str) -> Decimal:
-    s = raw.strip().replace(" ", "").replace(" ", "")
+    s = raw.strip().replace(" ", "").replace(" ", "")
     if "," in s and "." in s:
         if s.rindex(",") > s.rindex("."):
             s = s.replace(".", "").replace(",", ".")
@@ -71,25 +60,27 @@ def _parse_json(text: str) -> dict:
     return json.loads(stripped)
 
 
+def _call_claude(pdf_path: Path, client: anthropic.Anthropic, system_prompt: str) -> dict:
+    pdf_data = base64.standard_b64encode(pdf_path.read_bytes()).decode("utf-8")
+    document = {
+        "type": "document",
+        "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_data},
+    }
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=512,
+        system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": [document]}],
+    )
+    return _parse_json(response.content[0].text)
+
+
 def extract_payment_info(
     pdf_path: Path,
     client: anthropic.Anthropic,
     own_company_names: list[str],
 ) -> PaymentInfo:
-    text = extract_pdf_text(pdf_path)
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=512,
-        system=[
-            {
-                "type": "text",
-                "text": PAYMENT_SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[{"role": "user", "content": f"PDF text:\n\n{text}"}],
-    )
-    data = _parse_json(response.content[0].text)
+    data = _call_claude(pdf_path, client, PAYMENT_SYSTEM_PROMPT)
     counterparty = data["counterparty"]
     direction = data.get("direction", "outgoing")
     if any(name.lower() in counterparty.lower() for name in own_company_names):
@@ -105,20 +96,7 @@ def extract_payment_info(
 
 
 def extract_invoice_info(pdf_path: Path, client: anthropic.Anthropic) -> InvoiceInfo:
-    text = extract_pdf_text(pdf_path)
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=512,
-        system=[
-            {
-                "type": "text",
-                "text": INVOICE_SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[{"role": "user", "content": f"PDF text:\n\n{text}"}],
-    )
-    data = _parse_json(response.content[0].text)
+    data = _call_claude(pdf_path, client, INVOICE_SYSTEM_PROMPT)
     return InvoiceInfo(
         invoice_date=date.fromisoformat(data["invoice_date"]),
         amount=_parse_amount(data["amount"]),
