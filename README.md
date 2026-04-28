@@ -31,30 +31,24 @@ fibutool is a CLI bookkeeping tool that processes bank payment receipts and invo
 
 ## execute the tool
 
-    # Set your Anthropic API key in config.yaml, then run:
+    # Set your Anthropic API key in config.yaml, then run from the working directory:
     python main.py --last-receipt-number 42
 
-    # With explicit paths
-    python main.py --last-receipt-number 42 \
-        --payments ./payments \
-        --invoices ./invoices \
-        --merged ./merged \
-        --journal ./journal.csv
+    # Or point to a specific working directory:
+    python main.py --last-receipt-number 42 --workdir /archive/2024/january
 
-    # --journal accepts a directory (journal.csv placed inside) or a full file path
-    python main.py --last-receipt-number 42 --journal /archive/2024/bookkeeping.csv
-
-    # If output from a previous run exists, the tool will refuse and tell you to use --clean:
+    # If output from a previous run exists, the tool will refuse — use --clean to reset:
     python main.py --last-receipt-number 42 --clean
 
 ## folder layout
 
-The output directories must be created before the first run. The tool refuses to run if
-they are missing or contain files from a previous run (use --clean to reset).
+All input and output lives under the working directory (default: current directory).
+The output directories must exist before the first run. The tool refuses to run if they
+are missing or contain files from a previous run (use --clean to reset).
 
-    payments/           ← input: bank payment confirmation PDFs
-    invoices/           ← input: invoice PDFs (incoming and outgoing)
-    payments-ordered/   ← output: payments renamed NNN_YYYY-MM-DD_<orig>.pdf  (must exist)
-    merged/             ← output: merged PDFs (invoice pages first, then payment)  (must exist)
-    journal.csv         ← output: journal rows ready for import into Excel
-    config.yaml         ← own company names (Jarosoft / Michael Jaros)
+    <workdir>/payments/           ← input: bank payment confirmation PDFs
+    <workdir>/invoices/           ← input: invoice PDFs (incoming and outgoing)
+    <workdir>/payments-ordered/   ← output: payments renamed NNN_YYYY-MM-DD_<orig>.pdf  (must exist)
+    <workdir>/merged/             ← output: merged PDFs (invoice pages first, then payment)  (must exist)
+    <workdir>/journal.csv         ← output: journal rows ready for import into Excel
+    config.yaml                   ← own company names and API key (default: ./config.yaml)

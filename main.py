@@ -55,20 +55,8 @@ def main() -> None:
         help="Last used receipt number (next receipt will be N+1)",
     )
     parser.add_argument(
-        "--payments", type=Path, default=Path("payments"),
-        help="Folder with payment receipt PDFs (default: ./payments)",
-    )
-    parser.add_argument(
-        "--invoices", type=Path, default=Path("invoices"),
-        help="Folder with invoice PDFs (default: ./invoices)",
-    )
-    parser.add_argument(
-        "--merged", type=Path, default=Path("merged"),
-        help="Directory for merged invoice+payment PDFs (default: ./merged)",
-    )
-    parser.add_argument(
-        "--journal", type=Path, default=Path("."),
-        help="Journal output: directory (journal.csv placed inside) or full file path (default: ./journal.csv)",
+        "--workdir", type=Path, default=Path("."),
+        help="Working directory containing payments/, invoices/, merged/, payments-ordered/ and journal.csv (default: .)",
     )
     parser.add_argument(
         "--config", type=Path, default=Path("config.yaml"),
@@ -80,9 +68,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    payments_ordered_dir = Path("payments-ordered")
-    merged_dir = args.merged
-    csv_path = args.journal / "journal.csv" if not args.journal.suffix else args.journal
+    workdir = args.workdir
+    payments_dir = workdir / "payments"
+    invoices_dir = workdir / "invoices"
+    payments_ordered_dir = workdir / "payments-ordered"
+    merged_dir = workdir / "merged"
+    csv_path = workdir / "journal.csv"
 
     _preflight(merged_dir, payments_ordered_dir, csv_path, args.clean)
 
@@ -91,11 +82,11 @@ def main() -> None:
     api_key: str = config.get("anthropic_api_key") or ""
     client = anthropic.Anthropic(api_key=api_key or None)
 
-    payment_pdfs = sorted(p for p in args.payments.glob("*.pdf"))
-    invoice_pdfs = sorted(p for p in args.invoices.glob("*.pdf"))
+    payment_pdfs = sorted(p for p in payments_dir.glob("*.pdf"))
+    invoice_pdfs = sorted(p for p in invoices_dir.glob("*.pdf"))
 
     if not payment_pdfs:
-        print(f"Error: no PDF files found in {args.payments}", file=sys.stderr)
+        print(f"Error: no PDF files found in {payments_dir}", file=sys.stderr)
         sys.exit(1)
 
     # ── Step 1: Extract + order payments ─────────────────────────────────────
