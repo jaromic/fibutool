@@ -13,6 +13,7 @@ class PaymentInfo:
     counterparty: str
     direction: str          # 'outgoing' | 'incoming'
     pdf_path: Path
+    address: Optional[str] = None
     ordered_path: Optional[Path] = None
     receipt_number: Optional[int] = None
 
@@ -24,6 +25,7 @@ class InvoiceInfo:
     currency: str
     counterparty: str
     pdf_path: Path
+    address: Optional[str] = None
     matched: bool = False
 
 

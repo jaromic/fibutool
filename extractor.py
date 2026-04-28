@@ -3,6 +3,7 @@ import json
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Optional
 
 import anthropic
 
@@ -17,7 +18,11 @@ Fields:
 - amount: transaction amount as decimal string with dot as separator, always positive (e.g. "1234.56")
 - currency: 3-letter currency code (e.g. "EUR")
 - counterparty: name of the other party (recipient for outgoing payments, sender for incoming)
-- direction: "outgoing" if money left our account, "incoming" if money entered our account\
+- direction: "outgoing" if money left our account, "incoming" if money entered our account
+- street: street address of the counterparty, or null if not shown
+- postal_code: postal code of the counterparty, or null if not shown
+- town: town/city of the counterparty, or null if not shown
+- country: country of the counterparty, or null if not shown\
 """
 
 INVOICE_SYSTEM_PROMPT = """\
@@ -28,7 +33,11 @@ Fields:
 - invoice_date: invoice date in ISO format YYYY-MM-DD
 - amount: total amount including VAT as decimal string with dot as separator, always positive (e.g. "1234.56")
 - currency: 3-letter currency code (e.g. "EUR")
-- counterparty: the other company's name (issuer for bills we received, recipient for invoices we sent)\
+- counterparty: the other company's name (issuer for bills we received, recipient for invoices we sent)
+- street: street address of the counterparty, or null if not shown
+- postal_code: postal code of the counterparty, or null if not shown
+- town: town/city of the counterparty, or null if not shown
+- country: country of the counterparty, or null if not shown\
 """
 
 
@@ -58,6 +67,25 @@ def _parse_json(text: str) -> dict:
         lines = stripped.splitlines()
         stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
     return json.loads(stripped)
+
+
+def _format_address(data: dict) -> Optional[str]:
+    street = data.get("street")
+    postal_code = data.get("postal_code")
+    town = data.get("town")
+    country = data.get("country")
+    parts = []
+    if street:
+        parts.append(street)
+    if postal_code and town:
+        parts.append(f"{postal_code} {town}")
+    elif town:
+        parts.append(town)
+    elif postal_code:
+        parts.append(postal_code)
+    if country:
+        parts.append(country)
+    return ", ".join(parts) if parts else None
 
 
 def _call_claude(pdf_path: Path, client: anthropic.Anthropic, system_prompt: str) -> dict:
@@ -90,6 +118,7 @@ def extract_payment_info(
         amount=_parse_amount(data["amount"]),
         currency=data["currency"].upper(),
         counterparty=counterparty,
+        address=_format_address(data),
         direction=direction,
         pdf_path=pdf_path,
     )
@@ -102,5 +131,6 @@ def extract_invoice_info(pdf_path: Path, client: anthropic.Anthropic) -> Invoice
         amount=_parse_amount(data["amount"]),
         currency=data["currency"].upper(),
         counterparty=data["counterparty"],
+        address=_format_address(data),
         pdf_path=pdf_path,
     )

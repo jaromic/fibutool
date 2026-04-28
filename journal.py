@@ -24,11 +24,15 @@ def generate_csv(results: list[MatchResult], output_path: Path) -> None:
             if payment.direction == "incoming":
                 category = "Einnahmen"
                 detail_category = "Waren/Leistungserlöse"
-                counterparty = invoice.counterparty if invoice else ""
+                name = invoice.counterparty if invoice else ""
+                address = invoice.address if invoice else None
             else:
                 category = "Ausgaben"
                 detail_category = "sonstige Betriebsausgaben"
-                counterparty = payment.counterparty
+                name = payment.counterparty
+                address = payment.address
+
+            counterparty = f"{name}, {address}" if address else name
 
             gross = payment.amount
             net = (gross / (1 + VAT_RATE)).quantize(Decimal("0.01"))

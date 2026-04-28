@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from extractor import _parse_amount, _parse_json
+from extractor import _format_address, _parse_amount, _parse_json
 
 
 class TestParseAmount:
@@ -46,3 +46,28 @@ class TestParseJson:
 
     def test_fenced_without_closing_fence(self):
         assert _parse_json('```json\n{"key": "value"}') == {"key": "value"}
+
+
+class TestFormatAddress:
+    def test_full_address_with_country(self):
+        data = {"street": "Brünner Straße 52", "postal_code": "1210", "town": "Wien", "country": "Österreich"}
+        assert _format_address(data) == "Brünner Straße 52, 1210 Wien, Österreich"
+
+    def test_full_address_without_country(self):
+        data = {"street": "Brünner Straße 52", "postal_code": "1210", "town": "Wien", "country": None}
+        assert _format_address(data) == "Brünner Straße 52, 1210 Wien"
+
+    def test_town_only(self):
+        data = {"street": None, "postal_code": None, "town": "Wien", "country": None}
+        assert _format_address(data) == "Wien"
+
+    def test_postal_code_without_town(self):
+        data = {"street": None, "postal_code": "1210", "town": None, "country": None}
+        assert _format_address(data) == "1210"
+
+    def test_no_address_fields(self):
+        assert _format_address({}) is None
+
+    def test_all_null(self):
+        data = {"street": None, "postal_code": None, "town": None, "country": None}
+        assert _format_address(data) is None
