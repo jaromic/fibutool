@@ -27,8 +27,10 @@ def _preflight(merged_dir: Path, payments_ordered_dir: Path, csv_path: Path, cle
     if clean:
         for d in output_dirs:
             for item in d.iterdir():
+                print(f"  removing {item}")
                 item.unlink() if item.is_file() else shutil.rmtree(item)
         if csv_path.exists():
+            print(f"  removing {csv_path}")
             csv_path.unlink()
         return
 
