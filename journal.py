@@ -24,13 +24,13 @@ def generate_csv(results: list[MatchResult], output_path: Path) -> None:
             if payment.direction == "incoming":
                 category = "Einnahmen"
                 detail_category = "Waren/Leistungserlöse"
-                name = invoice.counterparty if invoice else ""
-                address = invoice.address if invoice else None
+                name = invoice.counterparty if invoice else payment.counterparty
+                address = invoice.address if invoice else payment.address
             else:
                 category = "Ausgaben"
                 detail_category = "sonstige Betriebsausgaben"
                 name = payment.counterparty
-                address = payment.address
+                address = invoice.address if invoice else payment.address
 
             counterparty = f"{name}, {address}" if address else name
 

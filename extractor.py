@@ -18,11 +18,7 @@ Fields:
 - amount: transaction amount as decimal string with dot as separator, always positive (e.g. "1234.56")
 - currency: 3-letter currency code (e.g. "EUR")
 - counterparty: name of the other party (recipient for outgoing payments, sender for incoming)
-- direction: "outgoing" if money left our account, "incoming" if money entered our account
-- street: street address of the counterparty, or null if not shown
-- postal_code: postal code of the counterparty, or null if not shown
-- town: town/city of the counterparty, or null if not shown
-- country: country of the counterparty, or null if not shown\
+- direction: "outgoing" if money left our account, "incoming" if money entered our account\
 """
 
 INVOICE_SYSTEM_PROMPT = """\
@@ -41,7 +37,7 @@ Fields:
 - street: street address of the counterparty, or null if not shown
 - postal_code: postal code of the counterparty, or null if not shown
 - town: town/city of the counterparty, or null if not shown
-- country: country of the counterparty, or null if not shown\
+- country: full country name in German (e.g. "Österreich", "Deutschland", "Schweiz"), or null if not shown — never use ISO codes\
 """
 
 
@@ -122,7 +118,6 @@ def extract_payment_info(
         amount=_parse_amount(data["amount"]),
         currency=data["currency"].upper(),
         counterparty=counterparty,
-        address=_format_address(data),
         direction=direction,
         pdf_path=pdf_path,
     )
