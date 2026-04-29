@@ -43,7 +43,7 @@ def generate_csv(results: list[MatchResult], output_path: Path) -> None:
                 f"{payment.receipt_number:03d}",  # receipt number
                 category,                         # Einnahmen / Ausgaben
                 detail_category,                  # sub-category
-                payment.booking_date.isoformat(), # booking date
+                payment.booking_date.strftime("%d.%m.%Y"), # booking date
                 counterparty,                     # recipient or paying party
                 "",                               # empty
                 "",                               # empty
