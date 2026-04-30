@@ -23,7 +23,7 @@ def generate_csv(results: list[MatchResult], output_path: Path) -> None:
 
             if payment.direction == "incoming":
                 category = "Einnahmen"
-                detail_category = "Waren/Leistungserlöse"
+                detail_category = "Waren-/Leistungserlöse"
                 name = invoice.counterparty if invoice else payment.counterparty
                 address = invoice.address if invoice else payment.address
             else:
@@ -35,21 +35,31 @@ def generate_csv(results: list[MatchResult], output_path: Path) -> None:
             counterparty = f"{name}, {address}" if address else name
 
             gross = payment.amount
-            net = (gross / (1 + VAT_RATE)).quantize(Decimal("0.01"))
-            vat = (gross - net).quantize(Decimal("0.01"))
 
-            writer.writerow([
-                payment.booking_date.year,       # year
-                f"{payment.receipt_number:03d}",  # receipt number
-                category,                         # Einnahmen / Ausgaben
-                detail_category,                  # sub-category
-                payment.booking_date.strftime("%d.%m.%Y"), # booking date
-                counterparty,                     # recipient or paying party
-                "",                               # empty
-                "",                               # empty
-                "",                               # empty
-                _eur(gross),                      # amount incl. VAT
-                "",                               # empty
-                _eur(net),                        # net (100%)
-                _eur(vat),                        # VAT (20%)
-            ])
+            percentage_for_business=100
+            percentage_vat=20
+            percentage_ig=""
+
+        writer.writerow([
+            payment.booking_date.year,       # year
+            f"{payment.receipt_number:03d}",  # receipt number
+            category,                         # Einnahmen / Ausgaben
+            detail_category,                  # sub-category
+            payment.booking_date.strftime("%d.%m.%Y"), # booking date
+            counterparty,                     # recipient or paying party
+            "",                               # empty
+            "",                               # Weiterverkauf
+            "FALSCH",                         # AFA
+            _eur(gross),                      # amount incl. VAT
+            "",                               # amount incl VAT (antlg.) COMPUTED
+            f"{percentage_for_business}%",    # Anteil
+            f"{percentage_vat}%",             # VAT percent
+            "",                               # VAT amount               COMPUTED
+            "",                               # VAT amoun (antl.g)       COMPUTED
+            "",                               # VAT deadline date        COMPUTED
+            f"{percentage_ig}"                # IG
+            "",                               # ESt Betrag bzugfsähig    COMPUTED
+            ""                                #                          COMPUTED
+
+        ])
+
