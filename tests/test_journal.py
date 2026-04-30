@@ -20,13 +20,14 @@ def _payment(amount, direction="outgoing", receipt_number=1):
     )
 
 
-def _invoice(counterparty="Supplier GmbH", invoice_type="incoming_invoice"):
+def _invoice(counterparty="Supplier GmbH", invoice_type="incoming_invoice", vat_rate=20):
     return InvoiceInfo(
         invoice_date=date(2024, 1, 10),
         amount=Decimal("120.00"),
         currency="EUR",
         counterparty=counterparty,
         invoice_type=invoice_type,
+        vat_rate=vat_rate,
         pdf_path=Path("invoice.pdf"),
     )
 
@@ -48,13 +49,33 @@ class TestEur:
 
 
 class TestVatSplit:
-    def test_round_amount(self, tmp_path):
-        # 120.00 / 1.20 → net 100.00, vat 20.00
-        result = MatchResult(payment=_payment("120.00"), invoice=_invoice())
+    def test_vat_from_invoice(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20))
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[12] == "20%"
-        assert row[15] == ""
+        assert row[18] == ""
+
+    def test_ig_when_vat_zero(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0))
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[12] == "0%"
+        assert row[18] == "20"
+
+    def test_vat_defaults_to_20_without_invoice(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=None)
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[12] == "20%"
+        assert row[18] == ""
+
+    def test_vat_defaults_to_20_when_rate_unknown(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=None))
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[12] == "20%"
+        assert row[18] == ""
 
     def test_outgoing_is_ausgaben(self, tmp_path):
         result = MatchResult(payment=_payment("120.00", direction="outgoing"), invoice=_invoice())

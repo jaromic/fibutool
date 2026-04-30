@@ -29,6 +29,7 @@ def _invoice_to_dict(inv: InvoiceInfo) -> dict:
         "pdf_path": str(inv.pdf_path),
         "invoice_type": inv.invoice_type,
         "address": inv.address,
+        "vat_rate": inv.vat_rate,
         "matched": inv.matched,
     }
 
@@ -56,6 +57,7 @@ def _invoice_from_dict(d: dict) -> InvoiceInfo:
         pdf_path=Path(d["pdf_path"]),
         invoice_type=d.get("invoice_type", "incoming_invoice"),
         address=d.get("address"),
+        vat_rate=d.get("vat_rate"),
         matched=d.get("matched", False),
     )
 

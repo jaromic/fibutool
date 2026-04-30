@@ -37,7 +37,8 @@ Fields:
 - street: street address of the counterparty, or null if not shown
 - postal_code: postal code of the counterparty, or null if not shown
 - town: town/city of the counterparty, or null if not shown
-- country: full country name in German (e.g. "Österreich", "Deutschland", "Schweiz"), or null if not shown — never use ISO codes\
+- country: full country name in German (e.g. "Österreich", "Deutschland", "Schweiz"), or null if not shown — never use ISO codes
+- vat_rate: VAT percentage as printed on the invoice, integer 0–100 (e.g. 20 for 20% VAT, 0 for reverse-charge / IG Leistung / steuerfreie Leistung)\
 """
 
 
@@ -125,6 +126,7 @@ def extract_payment_info(
 
 def extract_invoice_info(pdf_path: Path, client: anthropic.Anthropic) -> InvoiceInfo:
     data = _call_claude(pdf_path, client, INVOICE_SYSTEM_PROMPT)
+    raw_vat = data.get("vat_rate")
     return InvoiceInfo(
         invoice_date=date.fromisoformat(data["invoice_date"]),
         amount=_parse_amount(data["amount"]),
@@ -132,5 +134,6 @@ def extract_invoice_info(pdf_path: Path, client: anthropic.Anthropic) -> Invoice
         counterparty=data["counterparty"],
         invoice_type=data.get("invoice_type", "incoming_invoice"),
         address=_format_address(data),
+        vat_rate=int(raw_vat) if raw_vat is not None else None,
         pdf_path=pdf_path,
     )

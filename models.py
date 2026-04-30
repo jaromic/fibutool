@@ -27,6 +27,7 @@ class InvoiceInfo:
     pdf_path: Path
     invoice_type: str = "incoming_invoice"  # incoming_invoice | outgoing_invoice | credit_note
     address: Optional[str] = None
+    vat_rate: Optional[int] = None          # VAT percentage 0-100 as shown on the invoice
     matched: bool = False
 
 
