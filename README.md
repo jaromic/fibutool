@@ -40,6 +40,14 @@ fibutool is a CLI bookkeeping tool that processes bank payment receipts and invo
     # If output from a previous run exists, the tool will refuse — use --clean to reset:
     python main.py --last-receipt-number 42 --clean
 
+    # Regenerate journal.csv without re-running extraction, matching, or PDF merging.
+    # Requires a completed previous run (match_results.json and non-empty output dirs).
+    # Use this after editing journal.py to apply a changed format without API costs.
+    python main.py --journal-only
+
+    # --clean in journal-only mode removes only journal.csv (cache and merged dirs are kept):
+    python main.py --journal-only --clean
+
 ## folder layout
 
 All input and output lives under the working directory (default: current directory).
@@ -51,4 +59,5 @@ are missing or contain files from a previous run (use --clean to reset).
     <workdir>/payments-ordered/   ← output: payments renamed NNN_YYYY-MM-DD_<orig>.pdf  (must exist)
     <workdir>/merged/             ← output: merged PDFs (invoice pages first, then payment)  (must exist)
     <workdir>/journal.csv         ← output: journal rows ready for import into Excel
+    <workdir>/match_results.json  ← cache: extracted + matched data written after step 2; required for --journal-only
     config.yaml                   ← own company names and API key (default: ./config.yaml)

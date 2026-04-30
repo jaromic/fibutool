@@ -53,16 +53,8 @@ class TestVatSplit:
         result = MatchResult(payment=_payment("120.00"), invoice=_invoice())
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[11] == "100,00"
-        assert row[12] == "20,00"
-
-    def test_rounding(self, tmp_path):
-        # 119.00 / 1.20 = 99.1666… → net 99,17, vat 19,83
-        result = MatchResult(payment=_payment("119.00"), invoice=_invoice())
-        generate_csv([result], tmp_path / "journal.csv")
-        row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[11] == "99,17"
-        assert row[12] == "19,83"
+        assert row[12] == "20%"
+        assert row[15] == ""
 
     def test_outgoing_is_ausgaben(self, tmp_path):
         result = MatchResult(payment=_payment("120.00", direction="outgoing"), invoice=_invoice())
