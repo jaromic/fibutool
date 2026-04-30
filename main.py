@@ -29,7 +29,7 @@ def _preflight(
         missing.append(csv_path.parent)
     if missing:
         for d in missing:
-            print(f"Error: output directory does not exist: {d}", file=sys.stderr)
+            print(f"fibutool: output directory does not exist: {d}", file=sys.stderr)
         sys.exit(1)
 
     if clean:
@@ -49,22 +49,22 @@ def _preflight(
     if journal_only:
         empty_dirs = [str(d) for d in output_dirs if not any(d.iterdir())]
         if empty_dirs:
-            print("Error: --journal-only requires output from a completed run; these directories are empty:", file=sys.stderr)
+            print("fibutool: --journal-only requires output from a completed run; these directories are empty:", file=sys.stderr)
             for d in empty_dirs:
                 print(f"  {d}", file=sys.stderr)
             sys.exit(1)
         if match_cache_path and not match_cache_path.exists():
-            print(f"Error: {match_cache_path} not found — run without --journal-only first.", file=sys.stderr)
+            print(f"fibutool: {match_cache_path} not found — run without --journal-only first.", file=sys.stderr)
             sys.exit(1)
         if csv_path.exists():
-            print(f"Error: {csv_path} already exists. Use --clean to remove it.", file=sys.stderr)
+            print(f"fibutool: {csv_path} already exists; use --clean to remove it.", file=sys.stderr)
             sys.exit(1)
     else:
         conflicts = [str(d) for d in output_dirs if any(d.iterdir())]
         if csv_path.exists():
             conflicts.append(str(csv_path))
         if conflicts:
-            print("Error: output from a previous run already exists:", file=sys.stderr)
+            print("fibutool: output from a previous run already exists:", file=sys.stderr)
             for c in conflicts:
                 print(f"  {c}", file=sys.stderr)
             print("Use --clean to remove existing output before running.", file=sys.stderr)
@@ -76,18 +76,27 @@ def load_config(config_path: Path) -> dict:
         return yaml.safe_load(f)
 
 
+VERSION = "0.9.1"
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="fibutool — bookkeeping PDF processor")
-    parser.add_argument(
-        "--last-receipt-number", type=int, required=True, metavar="N",
-        help="Last used receipt number (next receipt will be N+1)",
+    parser = argparse.ArgumentParser(
+        prog="fibutool",
+        description="fibutool — bookkeeping PDF processor",
     )
     parser.add_argument(
-        "--workdir", type=Path, default=Path("."),
+        "--version", "-V", action="version", version=f"%(prog)s {VERSION}",
+    )
+    parser.add_argument(
+        "--last-receipt-number", "-n", type=int, default=None, metavar="N",
+        help="Last used receipt number (next receipt will be N+1); required unless --journal-only",
+    )
+    parser.add_argument(
+        "--workdir", "-w", type=Path, default=Path("."), metavar="DIR",
         help="Working directory containing payments/, invoices/, merged/, payments-ordered/ and journal.csv (default: .)",
     )
     parser.add_argument(
-        "--config", type=Path, default=Path("config.yaml"),
+        "--config", "-c", type=Path, default=Path("config.yaml"), metavar="FILE",
         help="Config file (default: ./config.yaml)",
     )
     parser.add_argument(
@@ -99,6 +108,9 @@ def main() -> None:
         help="Skip extraction, matching, and merging; regenerate journal.csv from the match cache written by a previous run",
     )
     args = parser.parse_args()
+
+    if not args.journal_only and args.last_receipt_number is None:
+        parser.error("--last-receipt-number / -n is required unless --journal-only is set")
 
     workdir = args.workdir
     payments_dir = workdir / "payments"
@@ -126,7 +138,7 @@ def main() -> None:
         invoice_pdfs = sorted(p for p in invoices_dir.glob("*.pdf"))
 
         if not payment_pdfs:
-            print(f"Error: no PDF files found in {payments_dir}", file=sys.stderr)
+            print(f"fibutool: no PDF files found in {payments_dir}", file=sys.stderr)
             sys.exit(1)
 
         # ── Step 1: Extract + order payments ─────────────────────────────────
@@ -142,7 +154,7 @@ def main() -> None:
                 print(f"ERROR: {e}", file=sys.stderr)
 
         if not payments:
-            print("Error: no payments could be extracted.", file=sys.stderr)
+            print("fibutool: no payments could be extracted.", file=sys.stderr)
             sys.exit(1)
 
         sorted_payments = order_payments(payments_ordered_dir, args.last_receipt_number, payments)
