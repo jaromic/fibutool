@@ -9,17 +9,17 @@ fibutool is a CLI bookkeeping tool that processes bank payment receipts and invo
 
 **Pipeline (4 steps):**
 
-1. **Extract** (`extractor.py`) — reads PDF text via `pdfplumber`, sends it to Claude (`claude-opus-4-7`) to parse structured fields (date, amount, currency, counterparty, direction).
+1. **Extract** (`extractor.py`) — sends each PDF as a base64 document to Claude (`claude-sonnet-4-6`) to parse structured fields (date, amount, currency, counterparty, direction, VAT rate, address).
 
 2. **Order** (`orderer.py`) — sorts payments by booking date, renames them with sequential receipt numbers (`001_2024-01-15_original.pdf`), copies them to `payments-ordered/`.
 
-3. **Match** (`matcher.py`) — for each payment, asks Claude (with extended thinking) to find the best unmatched invoice from the invoice list, based on company name, amount, direction, and date proximity.
+3. **Match** (`matcher.py`) — sends all payments and all invoices in a single batch call to Claude (`claude-opus-4-7`); returns the best assignment for each payment based on company name, amount, direction, and date proximity.
 
-4. **Merge + Journal** (`merger.py`, `journal.py`) — merges each matched invoice+payment into a single PDF in `merged/`; writes a `journal.csv` with gross/net/VAT columns in Austrian bookkeeping format (semicolon-delimited, UTF-8 BOM for Excel).
+4. **Merge + Journal** (`merger.py`, `journal.py`) — merges each matched invoice+payment into a single PDF in `merged/`; writes a `journal.csv` in Austrian bookkeeping format (semicolon-delimited, UTF-8 BOM for Excel).
 
 **Data model** (`models.py`): three dataclasses — `PaymentInfo`, `InvoiceInfo`, `MatchResult` — flow through the whole pipeline.
 
-**AI usage:** Claude is called 3× per document (extract payment, extract invoice, match) with prompt caching on system prompts to reduce costs.
+**AI usage:** Claude is called once per payment (extraction), once per invoice (extraction), and once total for matching. System prompts use prompt caching to reduce costs.
 
 ## prepare development environment
 
@@ -47,6 +47,26 @@ fibutool is a CLI bookkeeping tool that processes bank payment receipts and invo
 
     # --clean in journal-only mode removes only journal.csv (cache and merged dirs are kept):
     python main.py --journal-only --clean
+
+## split merged PDFs (test-data helper)
+
+`splitter.py` reverses the merge step: it splits merged PDFs back into separate
+invoice and payment files.  Useful for quickly preparing test data from an
+existing set of merged PDFs.
+
+    # Split all PDFs in merged/ into payments/ and invoices/ (current directory):
+    python splitter.py
+
+    # Or point to a specific working directory:
+    python splitter.py --workdir test_data/
+
+The working directory must contain `merged/`, `payments/`, and `invoices/`
+subdirectories.  `merged/` must be non-empty; `payments/` and `invoices/` must
+exist and be empty — the tool refuses to overwrite existing files.
+
+Each merged PDF is split as follows: the last page becomes
+`payments/<stem>_payment.pdf`; all preceding pages (if any) become
+`invoices/<stem>_invoice.pdf`.
 
 ## folder layout
 
