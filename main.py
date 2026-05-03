@@ -7,7 +7,12 @@ import anthropic
 import yaml
 
 from cache import load_results, save_results
-from extractor import extract_invoice_info, extract_payment_info
+from extractor import (
+    extract_invoice_info,
+    extract_payment_info,
+    validate_category_rules,
+    validate_business_percentage_rules,
+)
 from journal import generate_csv
 from matcher import match_payments
 from merger import merge_pdfs
@@ -107,6 +112,14 @@ def main() -> None:
         "--journal-only", action="store_true",
         help="Skip extraction, matching, and merging; regenerate journal.csv from the match cache written by a previous run",
     )
+    parser.add_argument(
+        "--only-payment", metavar="FILE", type=Path, default=None,
+        help="Process only this payment PDF instead of all files in payments/",
+    )
+    parser.add_argument(
+        "--only-invoice", metavar="FILE", type=Path, default=None,
+        help="Process only this invoice PDF instead of all files in invoices/",
+    )
     args = parser.parse_args()
 
     if not args.journal_only and args.last_receipt_number is None:
@@ -123,6 +136,7 @@ def main() -> None:
     _preflight(merged_dir, payments_ordered_dir, csv_path, args.clean,
                journal_only=args.journal_only, match_cache_path=match_cache_path)
 
+    invoice_extraction_warnings: list[str] = []
     if args.journal_only:
         # ── Journal-only mode: load cached match results, regenerate CSV ──────
         print(f"Loading match cache from {match_cache_path}...")
@@ -131,11 +145,32 @@ def main() -> None:
     else:
         config = load_config(args.config)
         own_company_names: list[str] = config.get("own_company_names", [])
+        category_rules: dict[str, str] = config.get("category_rules", {})
+        business_percentage_rules: dict[str, int] = config.get("business_percentage_rules", {})
+        try:
+            validate_category_rules(category_rules)
+            validate_business_percentage_rules(business_percentage_rules)
+        except ValueError as e:
+            print(f"fibutool: config error — {e}", file=sys.stderr)
+            sys.exit(1)
         api_key: str = config.get("anthropic_api_key") or ""
         client = anthropic.Anthropic(api_key=api_key or None)
 
-        payment_pdfs = sorted(p for p in payments_dir.glob("*.pdf"))
-        invoice_pdfs = sorted(p for p in invoices_dir.glob("*.pdf"))
+        if args.only_payment:
+            if not args.only_payment.exists():
+                print(f"fibutool: --only-payment file not found: {args.only_payment}", file=sys.stderr)
+                sys.exit(1)
+            payment_pdfs = [args.only_payment]
+        else:
+            payment_pdfs = sorted(p for p in payments_dir.glob("*.pdf"))
+
+        if args.only_invoice:
+            if not args.only_invoice.exists():
+                print(f"fibutool: --only-invoice file not found: {args.only_invoice}", file=sys.stderr)
+                sys.exit(1)
+            invoice_pdfs = [args.only_invoice]
+        else:
+            invoice_pdfs = sorted(p for p in invoices_dir.glob("*.pdf"))
 
         if not payment_pdfs:
             print(f"fibutool: no PDF files found in {payments_dir}", file=sys.stderr)
@@ -166,11 +201,12 @@ def main() -> None:
         for pdf_path in invoice_pdfs:
             print(f"  {pdf_path.name} ... ", end="", flush=True)
             try:
-                info = extract_invoice_info(pdf_path, client)
+                info = extract_invoice_info(pdf_path, client, category_rules, business_percentage_rules)
                 invoices.append(info)
                 print(f"{info.invoice_date}  {info.currency} {info.amount}  {info.counterparty}")
             except Exception as e:
-                print(f"ERROR: {e}", file=sys.stderr)
+                print(f"FAILED: {e}")
+                invoice_extraction_warnings.append(f"Invoice extraction failed for {pdf_path.name}: {e}")
 
         if invoice_pdfs and not invoices:
             print("Warning: no invoices could be extracted — all payments will be unmatched.", file=sys.stderr)
@@ -178,7 +214,7 @@ def main() -> None:
         print("  Matching payments to invoices...")
         results = match_payments(sorted_payments, invoices, client)
 
-        save_results(results, match_cache_path)
+        save_results(results, match_cache_path, all_invoices=invoices)
         print(f"  Match cache saved → {match_cache_path}")
 
         # ── Step 3: Merge PDFs ────────────────────────────────────────────────
@@ -195,7 +231,7 @@ def main() -> None:
     print(f"\nStep 4: Journal written → {csv_path}")
 
     # ── Summary ──────────────────────────────────────────────────────────────
-    warnings = [w for r in results for w in r.warnings]
+    warnings = invoice_extraction_warnings + [w for r in results for w in r.warnings]
     if warnings:
         print("\nWarnings:")
         for w in warnings:

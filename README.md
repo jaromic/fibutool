@@ -21,13 +21,20 @@ fibutool is a CLI bookkeeping tool that processes bank payment receipts and invo
 
 **AI usage:** Claude is called once per payment (extraction), once per invoice (extraction), and once total for matching. System prompts use prompt caching to reduce costs.
 
+**Invoice extraction** returns invoice positions (Rechnungspositionen) and the supplier's country in addition to header fields.  From these the pipeline derives:
+- **detail_category** — assigned by rule (`category_rules` in config, keyword → EÜR category); no LLM classification
+- **business_percentage** (Anteil) — assigned by rule (`business_percentage_rules` in config); defaults to 100 %
+- **IG** — set only when the supplier country is known and not Austria; domestic VAT-exempt invoices (e.g. insurance, SVS) are not marked IG
+- **AfA** — true when the invoice is for a depreciable asset (net > €1000, or not suitable as GWG)
+- **mixed VAT** — when positions carry different VAT rates the journal writes "mixed" and fills in the total VAT amount; otherwise the single rate is written and the amount is left for Excel to compute
+
 ## prepare development environment
 
     # Build docker image and run container
 
     docker build -t fibutool-dev .
 
-    MSYS_NO_PATHCONV=1 docker run -it -v "$(pwd -W)":/workspace -w /workspace --name fibutool-dev
+    MSYS_NO_PATHCONV=1 docker run -it -v "$(pwd -W)":/workspace -w /workspace --name fibutool-dev fibutool-dev
 
 ## execute the tool
 
@@ -80,4 +87,26 @@ are missing or contain files from a previous run (use --clean to reset).
     <workdir>/merged/             ← output: merged PDFs (invoice pages first, then payment)  (must exist)
     <workdir>/journal.csv         ← output: journal rows ready for import into Excel
     <workdir>/match_results.json  ← cache: extracted + matched data written after step 2; required for --journal-only
-    config.yaml                   ← own company names and API key (default: ./config.yaml)
+    config.yaml                   ← API key, company names, and matching rules (default: ./config.yaml)
+
+config.yaml structure:
+
+    anthropic_api_key: sk-ant-...
+
+    own_company_names:            # used to detect incoming payments (our name in counterparty)
+      - Jarosoft
+      - Michael Jaros
+
+    category_rules:               # maps counterparty keyword (case-insensitive substring) → EÜR category
+      Acme Telecom: "Telefon/Internet"
+      Example Software: "Lizenzgebühren"
+      Sozialversicherung: "Pflichtversicherungsbeiträge"
+      Cloud Provider: "sonstige Betriebsausgaben"
+      # unmatched incoming_invoice → "sonstige Betriebsausgaben"
+      # unmatched outgoing_invoice / credit_note → "Waren-/Leistungserlöse"
+      # category values must be from the built-in Austrian EÜR list; invalid values abort at startup
+
+    business_percentage_rules:    # maps counterparty keyword → Anteil % (1–100, default 100)
+      Acme Telecom: 67            # 67 % business use for phone/internet
+      "Gemeinde Musterstadt": 10  # 10 % business share of municipal bill
+      Cloud Provider: 50

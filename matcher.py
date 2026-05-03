@@ -11,12 +11,23 @@ Given a list of payments and a list of invoices, return the optimal 1-to-1 assig
 Each invoice may be assigned to at most one payment; each payment gets at most one invoice.
 
 Matching criteria (in order of importance):
-1. Direction: outgoing payment (we paid) → match to "incoming_invoice" (bill from that company);
-              incoming payment (we received) → match to "outgoing_invoice" (we sent to that company)
-                                               OR "credit_note" (Gutschrift received from that company)
-2. Company name: allow abbreviations, GmbH/Ltd/OG variants, partial name matches, minor spelling differences
-3. Amount: should match if same currency; for different currencies assess FX plausibility
-4. Date: invoice date should be 0–21 days before booking date; occasionally wider gaps are acceptable
+1. Company name: the most reliable signal. Allow abbreviations, GmbH/Ltd/OG variants, partial name
+   matches, and minor spelling differences.
+2. Date: invoice date should be 0–21 days before booking date; occasionally wider gaps are acceptable.
+3. Amount: the payment amount should be close to the invoice amount. However, when an invoice covers
+   both business and non-business positions (e.g. a municipal bill that includes private items), the
+   payment may be significantly lower than the invoice total — a strong company name + date match is
+   sufficient in that case.
+   Currency mismatch (e.g. invoice in USD, payment in EUR) is normal for international services — the
+   bank converts the currency so the numeric amounts will differ. Do not treat a currency difference as
+   a reason to reject a match; if company name and date align, match it and note the currency difference
+   in the reason.
+4. Direction: use as a supporting hint, not a hard filter.
+   - outgoing payment (we paid) → prefer "incoming_invoice"
+   - incoming payment (we received) → prefer "outgoing_invoice" or "credit_note"
+   Direction in the payment data can be wrong; SEPA direct debits (Lastschrift) where another party
+   pulls money from our account are sometimes misclassified as "incoming". If company name, date, and
+   amount match well but direction conflicts, still make the match and note the conflict in the reason.
 
 Return a JSON array with one entry per payment, in the same order as the input payments list:
 [
