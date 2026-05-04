@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## General Workflow
+
+* When I ask a question, answer the question.
+* When I instruct you to change something, unless it is a minor change of a few lines, first create a plan and then come back to me.
+  * Prefer minimal solutions that keep the system as consistent and reliable as possible.
+* After I give the GO, implement the change.
+* Update tests and documentation automatically if necessary.
+* Run tests automatically.
+
 ## Development Environment
 
 This project runs inside a Docker container (Python 3.12 + Node.js + Claude Code CLI). All development happens inside the container.
