@@ -55,6 +55,11 @@ fibutool is a CLI bookkeeping tool that processes bank payment receipts and invo
     # --clean in journal-only mode removes only journal.csv (cache and merged dirs are kept):
     python main.py --journal-only --clean
 
+    # Test the full pipeline with a single payment and invoice (cheap — 3 API calls total):
+    python main.py -n 42 --clean \
+        --only-payment payments/suspicious.pdf \
+        --only-invoice invoices/matching_invoice.pdf
+
 ## split merged PDFs (test-data helper)
 
 `splitter.py` reverses the merge step: it splits merged PDFs back into separate
@@ -94,8 +99,8 @@ config.yaml structure:
     anthropic_api_key: sk-ant-...
 
     own_company_names:            # used to detect incoming payments (our name in counterparty)
-      - Jarosoft
-      - Michael Jaros
+      - Acme GmbH
+      - Max Mustermann
 
     category_rules:               # maps counterparty keyword (case-insensitive substring) → EÜR category
       Acme Telecom: "Telefon/Internet"
