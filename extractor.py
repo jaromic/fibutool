@@ -20,7 +20,9 @@ Fields:
 - counterparty: name of the other party (recipient for outgoing payments, sender for incoming)
 - direction: "outgoing" if money left our account, "incoming" if money entered our account.
   Key indicator: a minus sign on the amount means debit (we paid → "outgoing");
-  no minus sign / positive amount means credit (we received → "incoming")\
+  no minus sign / positive amount means credit (we received → "incoming")
+- forex_fee: foreign currency fee (Fremdwährungsentgelt) as a positive decimal string if shown
+  separately on the receipt, otherwise "0"\
 """
 
 DETAIL_CATEGORIES = [
@@ -111,19 +113,19 @@ def _apply_category_rules(
     return _CATEGORY_DEFAULT_OUTGOING
 
 
-def _apply_percentage_rules(counterparty: str, rules: dict[str, int]) -> int:
+def _apply_percentage_rules(counterparty: str, rules: dict[str, float]) -> float:
     cp_lower = counterparty.lower()
     for keyword, pct in rules.items():
         if keyword.lower() in cp_lower:
             return pct
-    return 100
+    return 100.0
 
 
-def validate_business_percentage_rules(rules: dict[str, int]) -> None:
-    invalid = {k: v for k, v in rules.items() if not isinstance(v, int) or not (1 <= v <= 100)}
+def validate_business_percentage_rules(rules: dict[str, float]) -> None:
+    invalid = {k: v for k, v in rules.items() if not isinstance(v, (int, float)) or not (0 < v <= 100)}
     if invalid:
         lines = "\n".join(f"  {k!r}: {v}" for k, v in invalid.items())
-        raise ValueError(f"business_percentage_rules values must be integers 1–100:\n{lines}")
+        raise ValueError(f"business_percentage_rules values must be numbers between 0 and 100:\n{lines}")
 
 
 def _parse_amount(raw: str) -> Decimal:
@@ -244,6 +246,7 @@ def extract_payment_info(
         currency=data["currency"].upper(),
         counterparty=counterparty,
         direction=direction,
+        forex_fee=_parse_amount(data.get("forex_fee", "0")),
         pdf_path=pdf_path,
     )
 

@@ -13,6 +13,7 @@ def _payment_to_dict(p: PaymentInfo) -> dict:
         "currency": p.currency,
         "counterparty": p.counterparty,
         "direction": p.direction,
+        "forex_fee": str(p.forex_fee),
         "pdf_path": str(p.pdf_path),
         "address": p.address,
         "ordered_path": str(p.ordered_path) if p.ordered_path else None,
@@ -53,7 +54,7 @@ def _invoice_to_dict(inv: InvoiceInfo) -> dict:
         "vat_rate": inv.vat_rate,
         "positions": [_position_to_dict(p) for p in inv.positions],
         "detail_category": inv.detail_category,
-        "business_percentage": inv.business_percentage,
+        "business_percentage": float(inv.business_percentage),
         "afa": inv.afa,
         "matched": inv.matched,
     }
@@ -66,6 +67,7 @@ def _payment_from_dict(d: dict) -> PaymentInfo:
         currency=d["currency"],
         counterparty=d["counterparty"],
         direction=d["direction"],
+        forex_fee=Decimal(d.get("forex_fee", "0")),
         pdf_path=Path(d["pdf_path"]),
         address=d.get("address"),
         ordered_path=Path(d["ordered_path"]) if d.get("ordered_path") else None,
@@ -86,7 +88,7 @@ def _invoice_from_dict(d: dict) -> InvoiceInfo:
         vat_rate=d.get("vat_rate"),
         positions=[_position_from_dict(p) for p in d.get("positions", [])],
         detail_category=d.get("detail_category"),
-        business_percentage=d.get("business_percentage", 100),
+        business_percentage=float(d.get("business_percentage", 100)),
         afa=d.get("afa", False),
         matched=d.get("matched", False),
     )

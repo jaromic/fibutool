@@ -7,7 +7,7 @@ from journal import _eur, generate_csv
 from models import InvoiceInfo, InvoicePosition, MatchResult, PaymentInfo
 
 
-def _payment(amount, direction="outgoing", receipt_number=1):
+def _payment(amount, direction="outgoing", receipt_number=1, forex_fee="0"):
     return PaymentInfo(
         booking_date=date(2024, 1, 15),
         amount=Decimal(amount),
@@ -17,6 +17,7 @@ def _payment(amount, direction="outgoing", receipt_number=1):
         pdf_path=Path("payment.pdf"),
         ordered_path=Path("001_2024-01-15_payment.pdf"),
         receipt_number=receipt_number,
+        forex_fee=Decimal(forex_fee),
     )
 
 
@@ -222,3 +223,43 @@ class TestMixedVat:
         result = MatchResult(payment=_payment("170.00"), invoice=_invoice(positions=positions))
         generate_csv([result], tmp_path / "journal.csv")
         assert _read_csv(tmp_path / "journal.csv")[0][18] == ""
+
+
+class TestForexFee:
+    def test_no_fee_vat_blank(self, tmp_path):
+        # Without forex fee, VAT amount column stays blank (Excel computes it)
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20))
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[13] == ""
+
+    def test_fee_vat_computed_from_reduced_base(self, tmp_path):
+        # gross=21.20, forex_fee=0.31 → effective_base=20.89, VAT20% = 20.89/6 = 3.48
+        result = MatchResult(
+            payment=_payment("21.20", forex_fee="0.31"),
+            invoice=_invoice(vat_rate=20, country="Deutschland"),
+        )
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[9] == "21,20"   # gross unchanged
+        assert row[13] == "3,48"   # VAT on effective base 20.89 @ 20%
+
+    def test_fee_zero_vat_no_explicit_amount(self, tmp_path):
+        # IG (VAT=0%) with forex fee: no VAT to compute, column stays blank
+        result = MatchResult(
+            payment=_payment("21.20", forex_fee="0.31"),
+            invoice=_invoice(vat_rate=0, country="Deutschland"),
+        )
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[9] == "21,20"
+        assert row[13] == ""   # rate=0 → no VAT amount to write
+
+    def test_fee_gross_stays_full(self, tmp_path):
+        result = MatchResult(
+            payment=_payment("100.31", forex_fee="0.31"),
+            invoice=_invoice(vat_rate=20),
+        )
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[9] == "100,31"  # gross is full amount

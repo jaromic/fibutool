@@ -25,6 +25,7 @@ class PaymentInfo:
     address: Optional[str] = None
     ordered_path: Optional[Path] = None
     receipt_number: Optional[int] = None
+    forex_fee: Decimal = field(default_factory=lambda: Decimal("0"))
 
 
 @dataclass
@@ -40,7 +41,7 @@ class InvoiceInfo:
     vat_rate: Optional[int] = None          # VAT percentage 0-100 as shown on the invoice
     positions: list = field(default_factory=list)  # list[InvoicePosition]
     detail_category: Optional[str] = None
-    business_percentage: int = 100          # % of the expense that is business use
+    business_percentage: float = 100.0      # % of the expense that is business use
     afa: bool = False
     matched: bool = False
 
