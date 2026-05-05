@@ -9,7 +9,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   * Prefer minimal solutions that keep the system as consistent and reliable as possible.
 * After I give the GO, implement the change.
 * Update tests and documentation automatically if necessary.
-* Run tests automatically.
+* Run unit tests automatically.
+* Only when the current iteration has made a feature complete and all unit tests passed, execute a functional system test. To do that, execute the tool with as few test documents as possible, check output pdf and compare the csv output to the test_data/journal_testbase.csv
+* Fix all errors found in the test.
+* Evaluate our current development process and suggest improvements for the next round.
 
 ## Development Environment
 
