@@ -28,6 +28,7 @@ def _position_to_dict(p: InvoicePosition) -> dict:
         "vat_rate": p.vat_rate,
         "vat_amount": str(p.vat_amount),
         "gross_amount": str(p.gross_amount),
+        "is_business": p.is_business,
     }
 
 
@@ -38,6 +39,7 @@ def _position_from_dict(d: dict) -> InvoicePosition:
         vat_rate=int(d["vat_rate"]),
         vat_amount=Decimal(d["vat_amount"]),
         gross_amount=Decimal(d["gross_amount"]),
+        is_business=d.get("is_business", True),
     )
 
 

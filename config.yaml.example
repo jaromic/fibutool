@@ -1,5 +1,27 @@
 anthropic_api_key: sk-ant-...
 
+mixed_vat_label: "gemischt"
+decimal_separator: ","
+
 own_company_names:
-  - Jarosoft
-  - Michael Jaros
+  - MyCompany GmbH
+  - Jane Doe
+
+# keyword → detail category (substring match on counterparty name)
+category_rules:
+  Provider AG: "Telefon/Internet"
+  SoftwareCo: "Lizenzgebühren"
+  Insurance Ltd: "Pflichtversicherungsbeiträge"
+
+# keyword → % of expense that is business use (substring match on counterparty name)
+business_percentage_rules:
+  Provider AG: 66.67
+  Landlord GmbH: 25
+
+# keyword → list of keywords that mark a position as business use
+# Positions not matching any business_keyword are treated as private.
+# The business_percentage for the invoice is computed from the position gross amounts.
+# An overview page "Berechnung des abzugsfähigen Anteils" is inserted into the merged PDF.
+position_business_rules:
+  "Municipality Name":
+    business_keywords: ["Office", "Business"]

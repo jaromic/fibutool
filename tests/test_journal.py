@@ -21,13 +21,14 @@ def _payment(amount, direction="outgoing", receipt_number=1, forex_fee="0"):
     )
 
 
-def _pos(net, vat_rate, vat, gross, desc="Item"):
+def _pos(net, vat_rate, vat, gross, desc="Item", is_business=True):
     return InvoicePosition(
         description=desc,
         net_amount=Decimal(net),
         vat_rate=vat_rate,
         vat_amount=Decimal(vat),
         gross_amount=Decimal(gross),
+        is_business=is_business,
     )
 
 
@@ -71,6 +72,9 @@ class TestEur:
 
     def test_zero(self):
         assert _eur(Decimal("0")) == "0,00"
+
+    def test_custom_separator(self):
+        assert _eur(Decimal("1234.56"), sep=".") == "1234.56"
 
 
 class TestVatSplit:
@@ -195,13 +199,23 @@ class TestMixedVat:
         assert row[12] == "20%"
         assert row[13] == ""        # VAT amount stays COMPUTED for single rate
 
-    def test_mixed_rates_label(self, tmp_path):
+    def test_mixed_rates_label_default(self, tmp_path):
         positions = [
             _pos("100.00", 20, "20.00", "120.00", "Service"),
             _pos("50.00",  10,  "5.00",  "55.00", "Goods"),
         ]
         result = MatchResult(payment=_payment("175.00"), invoice=_invoice(positions=positions))
         generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[12] == "gemischt"
+
+    def test_mixed_rates_label_configurable(self, tmp_path):
+        positions = [
+            _pos("100.00", 20, "20.00", "120.00", "Service"),
+            _pos("50.00",  10,  "5.00",  "55.00", "Goods"),
+        ]
+        result = MatchResult(payment=_payment("175.00"), invoice=_invoice(positions=positions))
+        generate_csv([result], tmp_path / "journal.csv", mixed_vat_label="mixed")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[12] == "mixed"
 
@@ -263,3 +277,74 @@ class TestForexFee:
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[9] == "100,31"  # gross is full amount
+
+
+class TestPositionClassification:
+    """Position-level business/private classification affects journal gross and VAT."""
+
+    def _invoice_classified(self, biz_gross, biz_vat, priv_gross, priv_vat, business_percentage=9.22):
+        positions = [
+            _pos("100.00", 10, biz_vat, biz_gross, "Business item", is_business=True),
+            _pos("100.00", 10, priv_vat, priv_gross, "Private item", is_business=False),
+        ]
+        return _invoice(positions=positions, business_percentage=business_percentage)
+
+    def test_gross_is_sum_of_business_positions(self, tmp_path):
+        inv = self._invoice_classified("10.00", "0.91", "90.00", "8.18")
+        result = MatchResult(payment=_payment("100.00"), invoice=inv)
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[9] == "10,00"   # only the business position gross, not payment.amount
+
+    def test_vat_from_business_positions_only(self, tmp_path):
+        # single VAT rate among business positions
+        positions = [
+            _pos("100.00", 20, "20.00", "120.00", "Office", is_business=True),
+            _pos("100.00", 20, "20.00", "120.00", "Private", is_business=False),
+        ]
+        inv = _invoice(positions=positions)
+        result = MatchResult(payment=_payment("240.00"), invoice=inv)
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[9] == "120,00"   # business gross only
+        assert row[12] == "20%"     # single rate from business positions
+
+    def test_anteil_unchanged_by_classification(self, tmp_path):
+        # business_percentage comes from business_percentage_rules, not from position split
+        inv = self._invoice_classified("30.00", "2.73", "70.00", "6.36", business_percentage=9.22)
+        result = MatchResult(payment=_payment("100.00"), invoice=inv)
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[11] == "9,22%"  # Anteil still from business_percentage, not position ratio
+
+    def test_no_private_positions_uses_payment_amount(self, tmp_path):
+        # All positions business → gross = payment.amount as before
+        positions = [
+            _pos("100.00", 20, "20.00", "120.00", "Office", is_business=True),
+        ]
+        inv = _invoice(positions=positions)
+        result = MatchResult(payment=_payment("120.00"), invoice=inv)
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[9] == "120,00"
+
+
+class TestDecimalSeparator:
+    def test_dot_separator_in_amounts(self, tmp_path):
+        result = MatchResult(payment=_payment("1234.56"), invoice=_invoice(vat_rate=20))
+        generate_csv([result], tmp_path / "journal.csv", decimal_separator=".")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[9] == "1234.56"
+
+    def test_dot_separator_in_anteil(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(business_percentage=9.22))
+        generate_csv([result], tmp_path / "journal.csv", decimal_separator=".")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[11] == "9.22%"
+
+    def test_comma_separator_default(self, tmp_path):
+        result = MatchResult(payment=_payment("1234.56"), invoice=_invoice(vat_rate=20, business_percentage=9.22))
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[9] == "1234,56"
+        assert row[11] == "9,22%"

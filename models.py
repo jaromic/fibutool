@@ -12,6 +12,7 @@ class InvoicePosition:
     vat_rate: int        # percentage 0-100
     vat_amount: Decimal
     gross_amount: Decimal
+    is_business: bool = True
 
 
 @dataclass

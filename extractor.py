@@ -121,11 +121,45 @@ def _apply_percentage_rules(counterparty: str, rules: dict[str, float]) -> float
     return 100.0
 
 
+def _apply_position_business_rules(
+    counterparty: str,
+    positions: list,
+    rules: dict,
+) -> list:
+    """Classify each position as business or private based on keyword rules.
+
+    Returns updated positions when a rule matches the counterparty,
+    or the original list unchanged when no rule matches.
+    """
+    from dataclasses import replace
+    cp_lower = counterparty.lower()
+    for keyword, spec in rules.items():
+        if keyword.lower() in cp_lower:
+            biz_kws = [kw.lower() for kw in spec.get("business_keywords", [])]
+            return [
+                replace(p, is_business=any(kw in p.description.lower() for kw in biz_kws))
+                for p in positions
+            ]
+    return positions
+
+
 def validate_business_percentage_rules(rules: dict[str, float]) -> None:
     invalid = {k: v for k, v in rules.items() if not isinstance(v, (int, float)) or not (0 < v <= 100)}
     if invalid:
         lines = "\n".join(f"  {k!r}: {v}" for k, v in invalid.items())
         raise ValueError(f"business_percentage_rules values must be numbers between 0 and 100:\n{lines}")
+
+
+def validate_position_business_rules(rules: dict) -> None:
+    for key, val in rules.items():
+        if not isinstance(val, dict) or "business_keywords" not in val:
+            raise ValueError(
+                f"position_business_rules[{key!r}] must have a 'business_keywords' list"
+            )
+        if not isinstance(val["business_keywords"], list):
+            raise ValueError(
+                f"position_business_rules[{key!r}]['business_keywords'] must be a list of strings"
+            )
 
 
 def _parse_amount(raw: str) -> Decimal:
@@ -217,6 +251,7 @@ def _call_claude(
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=max_tokens,
+        temperature=0,
         system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": [document]}],
     )
@@ -256,11 +291,18 @@ def extract_invoice_info(
     client: anthropic.Anthropic,
     category_rules: dict[str, str] | None = None,
     business_percentage_rules: dict[str, int] | None = None,
+    position_business_rules: dict | None = None,
 ) -> InvoiceInfo:
     data = _call_claude(pdf_path, client, INVOICE_SYSTEM_PROMPT, max_tokens=4096)
     raw_vat = data.get("vat_rate")
     invoice_type = data.get("invoice_type", "incoming_invoice")
     counterparty = data["counterparty"]
+    positions = _parse_positions(data.get("positions") or [])
+
+    if position_business_rules and positions:
+        positions = _apply_position_business_rules(counterparty, positions, position_business_rules)
+    business_percentage = _apply_percentage_rules(counterparty, business_percentage_rules or {})
+
     return InvoiceInfo(
         invoice_date=date.fromisoformat(data["invoice_date"]),
         amount=_parse_amount(data["amount"]),
@@ -270,9 +312,9 @@ def extract_invoice_info(
         address=_format_address(data),
         country=data.get("country"),
         vat_rate=int(raw_vat) if raw_vat is not None else None,
-        positions=_parse_positions(data.get("positions") or []),
+        positions=positions,
         detail_category=_apply_category_rules(counterparty, invoice_type, category_rules or {}),
-        business_percentage=_apply_percentage_rules(counterparty, business_percentage_rules or {}),
+        business_percentage=business_percentage,
         afa=bool(data.get("afa", False)),
         pdf_path=pdf_path,
     )

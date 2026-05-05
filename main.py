@@ -12,6 +12,7 @@ from extractor import (
     extract_payment_info,
     validate_category_rules,
     validate_business_percentage_rules,
+    validate_position_business_rules,
 )
 from journal import generate_csv
 from matcher import match_payments
@@ -136,6 +137,10 @@ def main() -> None:
     _preflight(merged_dir, payments_ordered_dir, csv_path, args.clean,
                journal_only=args.journal_only, match_cache_path=match_cache_path)
 
+    config = load_config(args.config)
+    mixed_vat_label: str = config.get("mixed_vat_label", "gemischt")
+    decimal_separator: str = config.get("decimal_separator", ",")
+
     invoice_extraction_warnings: list[str] = []
     if args.journal_only:
         # ── Journal-only mode: load cached match results, regenerate CSV ──────
@@ -143,13 +148,15 @@ def main() -> None:
         results = load_results(match_cache_path)
         print(f"  {len(results)} match result(s) loaded.")
     else:
-        config = load_config(args.config)
         own_company_names: list[str] = config.get("own_company_names", [])
         category_rules: dict[str, str] = config.get("category_rules", {})
         business_percentage_rules: dict[str, int] = config.get("business_percentage_rules", {})
+        position_business_rules: dict = config.get("position_business_rules", {})
+        mixed_vat_label: str = config.get("mixed_vat_label", "gemischt")
         try:
             validate_category_rules(category_rules)
             validate_business_percentage_rules(business_percentage_rules)
+            validate_position_business_rules(position_business_rules)
         except ValueError as e:
             print(f"fibutool: config error — {e}", file=sys.stderr)
             sys.exit(1)
@@ -201,7 +208,7 @@ def main() -> None:
         for pdf_path in invoice_pdfs:
             print(f"  {pdf_path.name} ... ", end="", flush=True)
             try:
-                info = extract_invoice_info(pdf_path, client, category_rules, business_percentage_rules)
+                info = extract_invoice_info(pdf_path, client, category_rules, business_percentage_rules, position_business_rules)
                 invoices.append(info)
                 print(f"{info.invoice_date}  {info.currency} {info.amount}  {info.counterparty}")
             except Exception as e:
@@ -220,14 +227,14 @@ def main() -> None:
         # ── Step 3: Merge PDFs ────────────────────────────────────────────────
         print(f"\nStep 3: Merging PDFs into {merged_dir}/...")
         for result in results:
-            out = merge_pdfs(result, merged_dir)
+            out = merge_pdfs(result, merged_dir, decimal_separator)
             if result.invoice:
                 print(f"  {out.name}  ←  {result.invoice.pdf_path.name}")
             else:
                 print(f"  {out.name}  ⚠  no invoice matched")
 
     # ── Step 4: CSV journal ──────────────────────────────────────────────────
-    generate_csv(results, csv_path)
+    generate_csv(results, csv_path, mixed_vat_label, decimal_separator)
     print(f"\nStep 4: Journal written → {csv_path}")
 
     # ── Summary ──────────────────────────────────────────────────────────────

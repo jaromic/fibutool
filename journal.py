@@ -5,14 +5,20 @@ from pathlib import Path
 from models import MatchResult
 
 
-def _eur(d: Decimal) -> str:
-    return str(d.quantize(Decimal("0.01"))).replace(".", ",")
+def _eur(d: Decimal, sep: str = ",") -> str:
+    return str(d.quantize(Decimal("0.01"))).replace(".", sep)
 
 
-def generate_csv(results: list[MatchResult], output_path: Path) -> None:
+def generate_csv(
+    results: list[MatchResult],
+    output_path: Path,
+    mixed_vat_label: str = "gemischt",
+    decimal_separator: str = ",",
+) -> None:
     # utf-8-sig adds BOM so Excel opens it correctly; semicolon is the EU CSV delimiter
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f, delimiter=";")
+        sep = decimal_separator
 
         for result in results:
             payment = result.payment
@@ -33,9 +39,18 @@ def generate_csv(results: list[MatchResult], output_path: Path) -> None:
                 address = invoice.address if invoice else payment.address
 
             counterparty = f"{name}, {address}" if address else name
-            gross = payment.amount
             afa_str = "WAHR" if invoice and invoice.afa else "FALSCH"
             percentage_for_business = invoice.business_percentage if invoice else 100
+
+            # When position-level classification is active, only business positions
+            # are booked; their gross sum replaces the full payment amount.
+            if invoice and any(not p.is_business for p in invoice.positions):
+                active_positions = [p for p in invoice.positions if p.is_business]
+                gross = sum(p.gross_amount for p in active_positions)
+            else:
+                active_positions = invoice.positions if invoice else []
+                gross = payment.amount
+
             # When a forex fee is present the VAT base is the gross minus the fee;
             # gross stays as-is (the fee is also a business expense).
             effective_base = gross - payment.forex_fee
@@ -55,12 +70,12 @@ def generate_csv(results: list[MatchResult], output_path: Path) -> None:
                     return None
                 return (effective_base * Decimal(rate) / Decimal(100 + rate)).quantize(Decimal("0.01"))
 
-            # VAT: derive from positions when available (supports mixed rates)
-            if invoice and invoice.positions:
-                rates = {p.vat_rate for p in invoice.positions}
+            # VAT: derive from (active) positions when available (supports mixed rates)
+            if active_positions:
+                rates = {p.vat_rate for p in active_positions}
                 if len(rates) > 1:
-                    vat_str = "mixed"
-                    vat_amount = sum(p.vat_amount for p in invoice.positions)
+                    vat_str = mixed_vat_label
+                    vat_amount = sum(p.vat_amount for p in active_positions)
                     ig_str = ""
                 else:
                     rate = next(iter(rates))
@@ -87,11 +102,11 @@ def generate_csv(results: list[MatchResult], output_path: Path) -> None:
                 "",                                           # empty
                 "",                                           # Weiterverkauf
                 afa_str,                                      # AfA
-                _eur(gross),                                  # amount incl. VAT
+                _eur(gross, sep),                              # amount incl. VAT
                 "",                                           # amount incl. VAT (antlg.)  COMPUTED
-                f"{percentage_for_business:g}%",               # Anteil
+                f"{percentage_for_business:g}%".replace(".", sep),  # Anteil
                 vat_str,                                      # VAT percent
-                _eur(vat_amount) if vat_amount is not None else "",  # VAT amount (filled for mixed)
+                _eur(vat_amount, sep) if vat_amount is not None else "",  # VAT amount (filled for mixed)
                 "",                                           # VAT amount (antlg.)        COMPUTED
                 "",                                           # net amount                 COMPUTED
                 "",                                           # net amount (antlg.)        COMPUTED
