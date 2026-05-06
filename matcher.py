@@ -78,7 +78,7 @@ def match_payments(
                 "filename": inv.pdf_path.name,
                 "invoice_date": inv.invoice_date.isoformat(),
                 "invoice_type": inv.invoice_type,
-                "amount": str(inv.amount),
+                "amount": str(inv.gross_total),
                 "currency": inv.currency,
                 "counterparty": inv.counterparty,
             }

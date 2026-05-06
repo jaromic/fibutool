@@ -32,7 +32,7 @@ class PaymentInfo:
 @dataclass
 class InvoiceInfo:
     invoice_date: date
-    amount: Decimal
+    gross_total: Decimal
     currency: str
     counterparty: str
     pdf_path: Path
@@ -40,9 +40,9 @@ class InvoiceInfo:
     address: Optional[str] = None
     country: Optional[str] = None           # supplier country in German, e.g. "Österreich"
     vat_rate: Optional[int] = None          # VAT percentage 0-100 as shown on the invoice
+    net_total: Optional[Decimal] = None     # net total from invoice summary, if shown
     positions: list = field(default_factory=list)  # list[InvoicePosition]
     detail_category: Optional[str] = None
-    business_percentage: float = 100.0      # % of the expense that is business use
     afa: bool = False
     matched: bool = False
 
@@ -53,3 +53,4 @@ class MatchResult:
     invoice: Optional[InvoiceInfo]
     match_reason: str = ""
     warnings: list = field(default_factory=list)
+    business_percentage: float = 100.0

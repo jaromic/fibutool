@@ -40,11 +40,10 @@ def _invoice(
     detail_category=None,
     afa=False,
     country=None,
-    business_percentage=100,
 ):
     return InvoiceInfo(
         invoice_date=date(2024, 1, 10),
-        amount=Decimal("120.00"),
+        gross_total=Decimal("120.00"),
         currency="EUR",
         counterparty=counterparty,
         invoice_type=invoice_type,
@@ -53,7 +52,6 @@ def _invoice(
         detail_category=detail_category,
         afa=afa,
         country=country,
-        business_percentage=business_percentage,
         pdf_path=Path("invoice.pdf"),
     )
 
@@ -282,12 +280,12 @@ class TestForexFee:
 class TestPositionClassification:
     """Position-level business/private classification affects journal gross and VAT."""
 
-    def _invoice_classified(self, biz_gross, biz_vat, priv_gross, priv_vat, business_percentage=9.22):
+    def _invoice_classified(self, biz_gross, biz_vat, priv_gross, priv_vat):
         positions = [
             _pos("100.00", 10, biz_vat, biz_gross, "Business item", is_business=True),
             _pos("100.00", 10, priv_vat, priv_gross, "Private item", is_business=False),
         ]
-        return _invoice(positions=positions, business_percentage=business_percentage)
+        return _invoice(positions=positions)
 
     def test_gross_is_sum_of_business_positions(self, tmp_path):
         inv = self._invoice_classified("10.00", "0.91", "90.00", "8.18")
@@ -310,12 +308,12 @@ class TestPositionClassification:
         assert row[12] == "20%"     # single rate from business positions
 
     def test_anteil_unchanged_by_classification(self, tmp_path):
-        # business_percentage comes from business_percentage_rules, not from position split
-        inv = self._invoice_classified("30.00", "2.73", "70.00", "6.36", business_percentage=9.22)
-        result = MatchResult(payment=_payment("100.00"), invoice=inv)
+        # business_percentage lives on MatchResult, independent of position split
+        inv = self._invoice_classified("30.00", "2.73", "70.00", "6.36")
+        result = MatchResult(payment=_payment("100.00"), invoice=inv, business_percentage=9.22)
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[11] == "9,22%"  # Anteil still from business_percentage, not position ratio
+        assert row[11] == "9,22%"
 
     def test_no_private_positions_uses_payment_amount(self, tmp_path):
         # All positions business → gross = payment.amount as before
@@ -337,13 +335,13 @@ class TestDecimalSeparator:
         assert row[9] == "1234.56"
 
     def test_dot_separator_in_anteil(self, tmp_path):
-        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(business_percentage=9.22))
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(), business_percentage=9.22)
         generate_csv([result], tmp_path / "journal.csv", decimal_separator=".")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[11] == "9.22%"
 
     def test_comma_separator_default(self, tmp_path):
-        result = MatchResult(payment=_payment("1234.56"), invoice=_invoice(vat_rate=20, business_percentage=9.22))
+        result = MatchResult(payment=_payment("1234.56"), invoice=_invoice(vat_rate=20), business_percentage=9.22)
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[9] == "1234,56"

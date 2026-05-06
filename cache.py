@@ -46,7 +46,8 @@ def _position_from_dict(d: dict) -> InvoicePosition:
 def _invoice_to_dict(inv: InvoiceInfo) -> dict:
     return {
         "invoice_date": inv.invoice_date.isoformat(),
-        "amount": str(inv.amount),
+        "gross_total": str(inv.gross_total),
+        "net_total": str(inv.net_total) if inv.net_total is not None else None,
         "currency": inv.currency,
         "counterparty": inv.counterparty,
         "pdf_path": str(inv.pdf_path),
@@ -56,7 +57,6 @@ def _invoice_to_dict(inv: InvoiceInfo) -> dict:
         "vat_rate": inv.vat_rate,
         "positions": [_position_to_dict(p) for p in inv.positions],
         "detail_category": inv.detail_category,
-        "business_percentage": float(inv.business_percentage),
         "afa": inv.afa,
         "matched": inv.matched,
     }
@@ -78,9 +78,13 @@ def _payment_from_dict(d: dict) -> PaymentInfo:
 
 
 def _invoice_from_dict(d: dict) -> InvoiceInfo:
+    # gross_total was called "amount" in older cache files
+    raw_gross = d.get("gross_total") or d.get("amount")
+    raw_net = d.get("net_total")
     return InvoiceInfo(
         invoice_date=date.fromisoformat(d["invoice_date"]),
-        amount=Decimal(d["amount"]),
+        gross_total=Decimal(raw_gross),
+        net_total=Decimal(raw_net) if raw_net is not None else None,
         currency=d["currency"],
         counterparty=d["counterparty"],
         pdf_path=Path(d["pdf_path"]),
@@ -90,7 +94,6 @@ def _invoice_from_dict(d: dict) -> InvoiceInfo:
         vat_rate=d.get("vat_rate"),
         positions=[_position_from_dict(p) for p in d.get("positions", [])],
         detail_category=d.get("detail_category"),
-        business_percentage=float(d.get("business_percentage", 100)),
         afa=d.get("afa", False),
         matched=d.get("matched", False),
     )
@@ -108,6 +111,7 @@ def save_results(
                 "invoice": _invoice_to_dict(r.invoice) if r.invoice else None,
                 "match_reason": r.match_reason,
                 "warnings": r.warnings,
+                "business_percentage": r.business_percentage,
             }
             for r in results
         ],
@@ -126,6 +130,11 @@ def load_results(path: Path) -> list[MatchResult]:
             invoice=_invoice_from_dict(item["invoice"]) if item["invoice"] else None,
             match_reason=item.get("match_reason", ""),
             warnings=item.get("warnings", []),
+            # fall back to invoice-level field for caches written before this was moved
+            business_percentage=float(
+                item.get("business_percentage")
+                or (item["invoice"].get("business_percentage", 100.0) if item.get("invoice") else 100.0)
+            ),
         )
         for item in items
     ]

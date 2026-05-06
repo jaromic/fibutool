@@ -13,6 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 * Only when the current iteration has made a feature complete and all unit tests passed, execute a functional system test. To do that, execute the tool with as few test documents as possible, check output pdf and compare the csv output to the test_data/journal_testbase.csv
 * Fix all errors found in the test.
 * Evaluate our current development process and suggest improvements for the next round.
+* Make the one refactoring suggestion that has most impact with the most minimal change. What would make the system more maintainable and understandable for new developers?
 
 ## Development Environment
 

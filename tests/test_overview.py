@@ -13,12 +13,11 @@ def _invoice_with_positions():
     ]
     return InvoiceInfo(
         invoice_date=date(2024, 3, 1),
-        amount=Decimal("1000.00"),
+        gross_total=Decimal("1000.00"),
         currency="EUR",
         counterparty="Marktgemeinde Bisamberg",
         pdf_path=Path("invoice.pdf"),
         positions=positions,
-        business_percentage=10.0,
     )
 
 
@@ -31,3 +30,17 @@ class TestGenerateOverviewPdf:
     def test_non_empty(self):
         result = generate_overview_pdf(_invoice_with_positions())
         assert len(result) > 1000
+
+
+class TestTruncate:
+    def test_short_unchanged(self):
+        from overview import _truncate
+        assert _truncate("Kurze Beschreibung") == "Kurze Beschreibung"
+
+    def test_exactly_35_unchanged(self):
+        from overview import _truncate
+        assert _truncate("A" * 35) == "A" * 35
+
+    def test_36_truncated_with_ellipsis(self):
+        from overview import _truncate
+        assert _truncate("A" * 36) == "A" * 35 + "…"

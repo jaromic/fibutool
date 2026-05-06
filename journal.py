@@ -40,7 +40,7 @@ def generate_csv(
 
             counterparty = f"{name}, {address}" if address else name
             afa_str = "WAHR" if invoice and invoice.afa else "FALSCH"
-            percentage_for_business = invoice.business_percentage if invoice else 100
+            percentage_for_business = result.business_percentage
 
             # When position-level classification is active, only business positions
             # are booked; their gross sum replaces the full payment amount.

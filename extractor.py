@@ -1,5 +1,6 @@
 import base64
 import json
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -86,16 +87,17 @@ Fields:
 - town: town/city of the counterparty, or null if not shown
 - country: full country name in German (e.g. "Österreich", "Deutschland", "Schweiz"), or null if not shown — never use ISO codes
 - vat_rate: dominant VAT percentage as printed on the invoice, integer 0–100 (e.g. 20 for 20% VAT, 0 for reverse-charge / IG Leistung); use the rate that applies to the majority of the amount if mixed
+- net_total: total net amount (Nettobetrag/Summe netto) from the invoice summary as decimal string with dot separator, or null if not shown separately
 - positions: array of all invoice line items, each with:
     - description: position text as printed
-    - net_amount: net amount as decimal string with dot separator
+    - amount: the amount for this line item as printed on the invoice, decimal string with dot separator
     - vat_rate: VAT percentage for this position, integer 0–100
-    - vat_amount: VAT amount as decimal string with dot separator
-    - gross_amount: gross amount as decimal string with dot separator
 - afa: true if this invoice is for a depreciable tangible asset (abnutzbares Wirtschaftsgut) that must be
     capitalised and depreciated — applies when net amount exceeds €1000 Anschaffungskosten, or for lower
     amounts if the asset is not independently usable as a GWG (geringwertiges Wirtschaftsgut);
-    false for services, consumables, and assets that qualify as GWG\
+    false for services, consumables, and assets that qualify as GWG
+
+Read every page of the PDF. Capture every line item.\
 """
 
 
@@ -113,7 +115,7 @@ def _apply_category_rules(
     return _CATEGORY_DEFAULT_OUTGOING
 
 
-def _apply_percentage_rules(counterparty: str, rules: dict[str, float]) -> float:
+def apply_percentage_rules(counterparty: str, rules: dict[str, float]) -> float:
     cp_lower = counterparty.lower()
     for keyword, pct in rules.items():
         if keyword.lower() in cp_lower:
@@ -131,7 +133,6 @@ def _apply_position_business_rules(
     Returns updated positions when a rule matches the counterparty,
     or the original list unchanged when no rule matches.
     """
-    from dataclasses import replace
     cp_lower = counterparty.lower()
     for keyword, spec in rules.items():
         if keyword.lower() in cp_lower:
@@ -162,8 +163,70 @@ def validate_position_business_rules(rules: dict) -> None:
             )
 
 
+def _classify_position_amounts(
+    positions: list[InvoicePosition],
+    net_total: Optional[Decimal],
+    gross_total: Decimal,
+) -> list[InvoicePosition]:
+    """Determine whether extracted position amounts are net or gross, then fill in all three fields.
+
+    The LLM extracts only the printed amount per line. We decide if it's net or gross by
+    comparing the sum against the invoice-level totals, then derive net/vat/gross per position.
+    """
+    if not positions:
+        return positions
+
+    amount_sum = sum(p.gross_amount for p in positions)  # raw extracted amount stored temporarily
+    tol = Decimal("0.10")
+
+    if net_total is not None and abs(amount_sum - net_total) <= tol:
+        # Printed amounts are NET → compute gross = net * (1 + vat_rate/100)
+        result = []
+        for p in positions:
+            net = p.gross_amount
+            gross = (net * Decimal(100 + p.vat_rate) / Decimal(100)).quantize(Decimal("0.01"))
+            vat = gross - net
+            result.append(replace(p, net_amount=net, vat_amount=vat, gross_amount=gross))
+        return result
+
+    # Treat as GROSS (most common format, also the fallback when net_total is absent or unmatched)
+    result = []
+    for p in positions:
+        gross = p.gross_amount
+        net = (gross * Decimal(100) / Decimal(100 + p.vat_rate)).quantize(Decimal("0.01"))
+        vat = gross - net
+        result.append(replace(p, net_amount=net, vat_amount=vat, gross_amount=gross))
+    return result
+
+
+def validate_extracted_positions(invoice: "InvoiceInfo") -> list[str]:
+    """Check positional arithmetic after LLM extraction.
+
+    Two checks:
+    1. Sum of all position gross amounts ≈ invoice gross total (tolerance 0.05).
+    2. Per position: net + vat ≈ gross (tolerance 0.02).
+    """
+    warnings = []
+    if not invoice.positions:
+        return warnings
+    tol_pos = Decimal("0.02")
+    for i, p in enumerate(invoice.positions):
+        if abs(p.net_amount + p.vat_amount - p.gross_amount) > tol_pos:
+            warnings.append(
+                f"{invoice.pdf_path.name}: position {i + 1} ({p.description[:30]!r})"
+                f" net {p.net_amount} + vat {p.vat_amount} ≠ gross {p.gross_amount}"
+            )
+    pos_sum = sum(p.gross_amount for p in invoice.positions)
+    if abs(pos_sum - invoice.gross_total) > Decimal("0.05"):
+        warnings.append(
+            f"{invoice.pdf_path.name}: position gross sum {pos_sum} ≠ invoice amount {invoice.gross_total}"
+            f" (gap: {invoice.gross_total - pos_sum})"
+        )
+    return warnings
+
+
 def _parse_amount(raw: str) -> Decimal:
-    s = raw.strip().replace(" ", "").replace(" ", "")
+    s = raw.strip().replace(" ", "").replace(" ", "")
     if "," in s and "." in s:
         if s.rindex(",") > s.rindex("."):
             s = s.replace(".", "").replace(",", ".")
@@ -222,18 +285,24 @@ def _format_address(data: dict) -> Optional[str]:
 
 
 def _parse_positions(raw: list) -> list[InvoicePosition]:
+    """Parse position line items from LLM output.
+
+    The LLM extracts only 'amount' (as printed) and 'vat_rate' per position.
+    The raw amount is stored temporarily in gross_amount; _classify_position_amounts
+    fills in the correct net/vat/gross after determining whether amounts are net or gross.
+    """
     positions = []
     for p in raw:
         try:
             positions.append(InvoicePosition(
                 description=str(p.get("description", "")),
-                net_amount=_parse_amount(str(p["net_amount"])),
+                net_amount=Decimal("0"),
                 vat_rate=int(p["vat_rate"]),
-                vat_amount=_parse_amount(str(p["vat_amount"])),
-                gross_amount=_parse_amount(str(p["gross_amount"])),
+                vat_amount=Decimal("0"),
+                gross_amount=_parse_amount(str(p["amount"])),
             ))
         except (KeyError, ValueError):
-            pass  # skip any malformed position rather than failing the whole invoice
+            pass
     return positions
 
 
@@ -290,22 +359,27 @@ def extract_invoice_info(
     pdf_path: Path,
     client: anthropic.Anthropic,
     category_rules: dict[str, str] | None = None,
-    business_percentage_rules: dict[str, int] | None = None,
     position_business_rules: dict | None = None,
 ) -> InvoiceInfo:
     data = _call_claude(pdf_path, client, INVOICE_SYSTEM_PROMPT, max_tokens=4096)
     raw_vat = data.get("vat_rate")
     invoice_type = data.get("invoice_type", "incoming_invoice")
     counterparty = data["counterparty"]
+    gross_total = _parse_amount(data["amount"])
+
+    raw_net = data.get("net_total")
+    net_total = _parse_amount(str(raw_net)) if raw_net is not None else None
+
     positions = _parse_positions(data.get("positions") or [])
+    positions = _classify_position_amounts(positions, net_total, gross_total)
 
     if position_business_rules and positions:
         positions = _apply_position_business_rules(counterparty, positions, position_business_rules)
-    business_percentage = _apply_percentage_rules(counterparty, business_percentage_rules or {})
 
     return InvoiceInfo(
         invoice_date=date.fromisoformat(data["invoice_date"]),
-        amount=_parse_amount(data["amount"]),
+        gross_total=gross_total,
+        net_total=net_total,
         currency=data["currency"].upper(),
         counterparty=counterparty,
         invoice_type=invoice_type,
@@ -314,7 +388,6 @@ def extract_invoice_info(
         vat_rate=int(raw_vat) if raw_vat is not None else None,
         positions=positions,
         detail_category=_apply_category_rules(counterparty, invoice_type, category_rules or {}),
-        business_percentage=business_percentage,
         afa=bool(data.get("afa", False)),
         pdf_path=pdf_path,
     )

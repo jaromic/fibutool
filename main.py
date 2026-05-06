@@ -8,11 +8,13 @@ import yaml
 
 from cache import load_results, save_results
 from extractor import (
+    apply_percentage_rules,
     extract_invoice_info,
     extract_payment_info,
     validate_category_rules,
     validate_business_percentage_rules,
     validate_position_business_rules,
+    validate_extracted_positions,
 )
 from journal import generate_csv
 from matcher import match_payments
@@ -208,9 +210,11 @@ def main() -> None:
         for pdf_path in invoice_pdfs:
             print(f"  {pdf_path.name} ... ", end="", flush=True)
             try:
-                info = extract_invoice_info(pdf_path, client, category_rules, business_percentage_rules, position_business_rules)
+                info = extract_invoice_info(pdf_path, client, category_rules, position_business_rules)
                 invoices.append(info)
-                print(f"{info.invoice_date}  {info.currency} {info.amount}  {info.counterparty}")
+                print(f"{info.invoice_date}  {info.currency} {info.gross_total}  {info.counterparty}")
+                for w in validate_extracted_positions(info):
+                    invoice_extraction_warnings.append(w)
             except Exception as e:
                 print(f"FAILED: {e}")
                 invoice_extraction_warnings.append(f"Invoice extraction failed for {pdf_path.name}: {e}")
@@ -220,6 +224,11 @@ def main() -> None:
 
         print("  Matching payments to invoices...")
         results = match_payments(sorted_payments, invoices, client)
+        for result in results:
+            if result.invoice:
+                result.business_percentage = apply_percentage_rules(
+                    result.invoice.counterparty, business_percentage_rules
+                )
 
         save_results(results, match_cache_path, all_invoices=invoices)
         print(f"  Match cache saved → {match_cache_path}")
