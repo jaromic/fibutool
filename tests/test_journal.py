@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from journal import _eur, _is_ig, _vat_forex_correction, generate_csv
+from journal import _eur, _is_ig, _vat_deadline, generate_csv
 from models import InvoiceInfo, InvoicePosition, MatchResult, PaymentInfo
 
 
@@ -82,22 +82,30 @@ class TestIsIg:
         assert _is_ig(0, _invoice(country="Schweiz")) is True
 
 
-class TestVatForexCorrection:
-    def test_no_forex_fee_returns_none(self):
-        assert _vat_forex_correction(20, Decimal("0"), Decimal("100.00")) is None
+class TestVatDeadline:
+    def test_q1_january(self):
+        assert _vat_deadline(date(2024, 1, 15)) == date(2024, 5, 15)
 
-    def test_zero_rate_returns_none(self):
-        assert _vat_forex_correction(0, Decimal("0.31"), Decimal("20.89")) is None
+    def test_q1_march(self):
+        assert _vat_deadline(date(2024, 3, 31)) == date(2024, 5, 15)
 
-    def test_20pct_rate_computed_correctly(self):
-        # effective_base=20.89, rate=20 → 20.89 * 20 / 120 = 3.4817 → 3.48
-        result = _vat_forex_correction(20, Decimal("0.31"), Decimal("20.89"))
-        assert result == Decimal("3.48")
+    def test_q2_april(self):
+        assert _vat_deadline(date(2024, 4, 1)) == date(2024, 8, 15)
 
-    def test_10pct_rate_computed_correctly(self):
-        # effective_base=100.00, rate=10 → 100 * 10 / 110 = 9.0909 → 9.09
-        result = _vat_forex_correction(10, Decimal("1.00"), Decimal("100.00"))
-        assert result == Decimal("9.09")
+    def test_q2_june(self):
+        assert _vat_deadline(date(2024, 6, 30)) == date(2024, 8, 15)
+
+    def test_q3_july(self):
+        assert _vat_deadline(date(2024, 7, 1)) == date(2024, 11, 15)
+
+    def test_q3_september(self):
+        assert _vat_deadline(date(2024, 9, 30)) == date(2024, 11, 15)
+
+    def test_q4_october(self):
+        assert _vat_deadline(date(2024, 10, 1)) == date(2025, 2, 15)
+
+    def test_q4_december(self):
+        assert _vat_deadline(date(2024, 12, 31)) == date(2025, 2, 15)
 
 
 class TestEur:
@@ -234,7 +242,7 @@ class TestMixedVat:
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[12] == "20%"
-        assert row[13] == ""        # VAT amount stays COMPUTED for single rate
+        assert row[13] == "20,00"   # VAT amount from position
 
     def test_mixed_rates_label_default(self, tmp_path):
         positions = [
@@ -277,12 +285,11 @@ class TestMixedVat:
 
 
 class TestForexFee:
-    def test_no_fee_vat_blank(self, tmp_path):
-        # Without forex fee, VAT amount column stays blank (Excel computes it)
+    def test_no_fee_vat_computed(self, tmp_path):
         result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20))
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[13] == ""
+        assert row[13] == "20,00"   # 120 * 20/120
 
     def test_fee_vat_computed_from_reduced_base(self, tmp_path):
         # gross=21.20, forex_fee=0.31 → effective_base=20.89, VAT20% = 20.89/6 = 3.48
@@ -295,8 +302,8 @@ class TestForexFee:
         assert row[9] == "21,20"   # gross unchanged
         assert row[13] == "3,48"   # VAT on effective base 20.89 @ 20%
 
-    def test_fee_zero_vat_no_explicit_amount(self, tmp_path):
-        # IG (VAT=0%) with forex fee: no VAT to compute, column stays blank
+    def test_fee_zero_vat_amount_is_zero(self, tmp_path):
+        # IG (VAT=0%): VAT amount is always written, zero for 0% rate
         result = MatchResult(
             payment=_payment("21.20", forex_fee="0.31"),
             invoice=_invoice(vat_rate=0, country="Deutschland"),
@@ -304,7 +311,7 @@ class TestForexFee:
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[9] == "21,20"
-        assert row[13] == ""   # rate=0 → no VAT amount to write
+        assert row[13] == "0,00"
 
     def test_fee_gross_stays_full(self, tmp_path):
         result = MatchResult(
@@ -385,3 +392,79 @@ class TestDecimalSeparator:
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[9] == "1234,56"
         assert row[11] == "9,22%"
+
+
+class TestComputedFields:
+    """All formerly-COMPUTED columns are now filled by Python."""
+
+    def test_gross_anteilig_full_business(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20))
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][10] == "120,00"
+
+    def test_gross_anteilig_partial_business(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20), business_percentage=50.0)
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][10] == "60,00"
+
+    def test_vat_amount_from_invoice_rate(self, tmp_path):
+        # 120.00 * 20/120 = 20.00
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20))
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][13] == "20,00"
+
+    def test_vat_anteilig(self, tmp_path):
+        # vat=20.00, 50% business → 10.00
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20), business_percentage=50.0)
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][14] == "10,00"
+
+    def test_net_from_invoice_rate(self, tmp_path):
+        # 120.00 - 20.00 vat = 100.00
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20))
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][15] == "100,00"
+
+    def test_net_from_positions(self, tmp_path):
+        positions = [_pos("100.00", 20, "20.00", "120.00")]
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(positions=positions))
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][15] == "100,00"
+
+    def test_net_anteilig(self, tmp_path):
+        # net=100.00, 50% business → 50.00
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20), business_percentage=50.0)
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][16] == "50,00"
+
+    def test_vat_deadline_q1(self, tmp_path):
+        # booking_date=2024-01-15 → Q1 → 15.05.2024
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice())
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][17] == "15.05.2024"
+
+    def test_ig_vat_anteilig_when_ig(self, tmp_path):
+        # IG, gross=120.00, full business → 20% * 120.00 = 24.00
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, country="Deutschland"))
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][20] == "24,00"
+
+    def test_ig_vat_anteilig_blank_when_not_ig(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20))
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][20] == ""
+
+    def test_ig_vat_rate_configurable(self, tmp_path):
+        # ig_vat_rate=10, gross=120.00 → 10% * 120.00 = 12.00
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, country="Deutschland"))
+        generate_csv([result], tmp_path / "journal.csv", ig_vat_rate=10)
+        assert _read_csv(tmp_path / "journal.csv")[0][20] == "12,00"
+
+    def test_net_forex_no_positions(self, tmp_path):
+        # gross=21.20, forex_fee=0.31 → effective_base=20.89, vat20%=3.48 → net=17.41
+        result = MatchResult(
+            payment=_payment("21.20", forex_fee="0.31"),
+            invoice=_invoice(vat_rate=20),
+        )
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][15] == "17,41"

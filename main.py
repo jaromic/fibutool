@@ -142,6 +142,7 @@ def main() -> None:
     config = load_config(args.config)
     mixed_vat_label: str = config.get("mixed_vat_label", "gemischt")
     decimal_separator: str = config.get("decimal_separator", ",")
+    ig_vat_rate: int = config.get("ig_vat_rate", 20)
 
     invoice_extraction_warnings: list[str] = []
     if args.journal_only:
@@ -243,7 +244,7 @@ def main() -> None:
                 print(f"  {out.name}  ⚠  no invoice matched")
 
     # ── Step 4: CSV journal ──────────────────────────────────────────────────
-    generate_csv(results, csv_path, mixed_vat_label, decimal_separator)
+    generate_csv(results, csv_path, mixed_vat_label, decimal_separator, ig_vat_rate)
     print(f"\nStep 4: Journal written → {csv_path}")
 
     # ── Summary ──────────────────────────────────────────────────────────────

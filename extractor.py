@@ -8,6 +8,7 @@ from typing import Optional
 
 import anthropic
 
+from api import call_with_retry
 from models import InvoiceInfo, InvoicePosition, PaymentInfo
 
 PAYMENT_SYSTEM_PROMPT = """\
@@ -39,7 +40,7 @@ DETAIL_CATEGORIES = [
     "Lizenzgebühren",
     "Werbe- und Repräsentationsaufwand",
     "Zinsen und ähnliche Aufwendungen",
-    "Pflichtversicherungsbeiträge",
+    "Pflichversicherungsbeiträge",
     "betriebliche Spenden an Forschungs- und Lehreinrichtungen",
     "betriebliche Spenden an mildtätige Organisationen",
     "betriebliche Spenden an Umweltorganisationen und Tierheime",
@@ -317,13 +318,13 @@ def _call_claude(
         "type": "document",
         "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_data},
     }
-    response = client.messages.create(
+    response = call_with_retry(lambda: client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=max_tokens,
         temperature=0,
         system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": [document]}],
-    )
+    ))
     if response.stop_reason == "max_tokens":
         raise ValueError(f"LLM response truncated (max_tokens={max_tokens} reached) — increase max_tokens or simplify the PDF")
     text_block = next((b.text for b in response.content if b.type == "text"), None)

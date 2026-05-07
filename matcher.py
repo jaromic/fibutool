@@ -2,6 +2,7 @@ import json
 
 import anthropic
 
+from api import call_with_retry
 from models import InvoiceInfo, MatchResult, PaymentInfo
 
 MATCHING_INSTRUCTIONS = """\
@@ -88,7 +89,7 @@ def match_payments(
         indent=2,
     )
 
-    response = client.messages.create(
+    response = call_with_retry(lambda: client.messages.create(
         model="claude-opus-4-7",
         max_tokens=4096,
         system=[
@@ -108,7 +109,7 @@ def match_payments(
                 ),
             }
         ],
-    )
+    ))
 
     text_block = next((b.text for b in response.content if b.type == "text"), None)
     if not text_block:

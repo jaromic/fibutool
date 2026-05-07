@@ -105,7 +105,7 @@ config.yaml structure:
     category_rules:               # maps counterparty keyword (case-insensitive substring) → EÜR category
       Acme Telecom: "Telefon/Internet"
       Example Software: "Lizenzgebühren"
-      Sozialversicherung: "Pflichtversicherungsbeiträge"
+      Sozialversicherung: "Pflichversicherungsbeiträge" # intentionally mis-spelled
       Cloud Provider: "sonstige Betriebsausgaben"
       # unmatched incoming_invoice → "sonstige Betriebsausgaben"
       # unmatched outgoing_invoice / credit_note → "Waren-/Leistungserlöse"

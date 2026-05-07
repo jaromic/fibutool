@@ -1,4 +1,5 @@
 import csv
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
@@ -19,11 +20,14 @@ def _is_ig(rate: int, invoice: Optional[InvoiceInfo]) -> bool:
     return invoice.country is not None and invoice.country != "Österreich"
 
 
-def _vat_forex_correction(rate: int, forex_fee: Decimal, effective_base: Decimal) -> Decimal | None:
-    """Return explicit VAT when a forex fee shifts the base; None lets Excel derive VAT from gross."""
-    if not forex_fee or rate == 0:
-        return None
-    return (effective_base * Decimal(rate) / Decimal(100 + rate)).quantize(Decimal("0.01"))
+def _vat_deadline(booking_date: date) -> date:
+    """Return the quarterly VAT advance return deadline (Voranmeldefrist) for a booking date."""
+    q = (booking_date.month - 1) // 3 + 1
+    y = booking_date.year
+    if q == 1: return date(y, 5, 15)
+    if q == 2: return date(y, 8, 15)
+    if q == 3: return date(y, 11, 15)
+    return date(y + 1, 2, 15)
 
 
 def generate_csv(
@@ -31,6 +35,7 @@ def generate_csv(
     output_path: Path,
     mixed_vat_label: str = "gemischt",
     decimal_separator: str = ",",
+    ig_vat_rate: int = 20,
 ) -> None:
     # utf-8-sig adds BOM so Excel opens it correctly; semicolon is the EU CSV delimiter
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -61,11 +66,14 @@ def generate_csv(
 
             # When position-level classification is active, only business positions
             # are booked; their gross sum replaces the full payment amount.
+            # When invoice and payment currencies differ, position amounts are in the
+            # invoice currency and cannot be used for EUR journal fields.
+            same_currency = not invoice or invoice.currency == payment.currency
             if invoice and any(not p.is_business for p in invoice.positions):
                 active_positions = [p for p in invoice.positions if p.is_business]
                 gross = sum(p.gross_amount for p in active_positions)
             else:
-                active_positions = invoice.positions if invoice else []
+                active_positions = invoice.positions if (invoice and same_currency) else []
                 gross = payment.amount
 
             # When a forex fee is present the VAT base is the gross minus the fee;
@@ -82,38 +90,54 @@ def generate_csv(
                 else:
                     rate = next(iter(rates))
                     vat_str = f"{rate}%"
-                    vat_amount = _vat_forex_correction(rate, payment.forex_fee, effective_base)
-                    ig_str = "20" if _is_ig(rate, invoice) else ""
+                    vat_amount = sum(p.vat_amount for p in active_positions)
+                    ig_str = str(ig_vat_rate) if _is_ig(rate, invoice) else ""
             elif invoice and invoice.vat_rate is not None:
                 rate = invoice.vat_rate
                 vat_str = f"{rate}%"
-                vat_amount = _vat_forex_correction(rate, payment.forex_fee, effective_base)
-                ig_str = "20" if _is_ig(rate, invoice) else ""
+                vat_amount = (effective_base * Decimal(rate) / Decimal(100 + rate)).quantize(Decimal("0.01"))
+                ig_str = str(ig_vat_rate) if _is_ig(rate, invoice) else ""
             else:
                 vat_str = "20%"
-                vat_amount = _vat_forex_correction(20, payment.forex_fee, effective_base)
+                vat_amount = (effective_base * Decimal(20) / Decimal(120)).quantize(Decimal("0.01"))
                 ig_str = ""
 
+            # Derived fields
+            pct = Decimal(str(percentage_for_business)) / Decimal("100")
+            gross_anteilig = (gross * pct).quantize(Decimal("0.01"))
+            vat_anteilig = (vat_amount * pct).quantize(Decimal("0.01"))
+            net = (
+                sum(p.net_amount for p in active_positions)
+                if active_positions
+                else effective_base - vat_amount
+            )
+            net_anteilig = (net * pct).quantize(Decimal("0.01"))
+            vat_deadline = _vat_deadline(payment.booking_date)
+            ig_vat_anteilig = (
+                (Decimal(ig_vat_rate) / Decimal(100) * gross_anteilig).quantize(Decimal("0.01"))
+                if ig_str else None
+            )
+
             writer.writerow([
-                payment.booking_date.year,                   # year
-                f"{payment.receipt_number:03d}",              # receipt number
-                category,                                     # Einnahmen / Ausgaben
-                detail_category,                              # sub-category
-                payment.booking_date.strftime("%d.%m.%Y"),   # booking date
-                counterparty,                                 # recipient or paying party
-                "",                                           # empty
-                "",                                           # Weiterverkauf
-                afa_str,                                      # AfA
-                _eur(gross, sep),                              # amount incl. VAT
-                "",                                           # amount incl. VAT (antlg.)  COMPUTED
-                f"{percentage_for_business:g}%".replace(".", sep),  # Anteil
-                vat_str,                                      # VAT percent
-                _eur(vat_amount, sep) if vat_amount is not None else "",  # VAT amount (filled for mixed)
-                "",                                           # VAT amount (antlg.)        COMPUTED
-                "",                                           # net amount                 COMPUTED
-                "",                                           # net amount (antlg.)        COMPUTED
-                "",                                           # VAT deadline date          COMPUTED
-                ig_str,                                       # IG
-                "",                                           # ESt Betrag abzugsfähig     COMPUTED
-                "",                                           #                            COMPUTED
+                payment.booking_date.year,                          # year
+                f"{payment.receipt_number:03d}",                    # receipt number
+                category,                                           # Einnahmen / Ausgaben
+                detail_category,                                    # sub-category
+                payment.booking_date.strftime("%d.%m.%Y"),         # booking date
+                counterparty,                                       # recipient or paying party
+                "",                                                 # empty
+                "",                                                 # Weiterverkauf
+                afa_str,                                            # AfA
+                _eur(gross, sep),                                   # amount incl. VAT
+                _eur(gross_anteilig, sep),                          # amount incl. VAT (antlg.)
+                f"{percentage_for_business:g}%".replace(".", sep), # Anteil
+                vat_str,                                            # VAT percent
+                _eur(vat_amount, sep),                              # VAT amount
+                _eur(vat_anteilig, sep),                            # VAT amount (antlg.)
+                _eur(net, sep),                                     # net amount
+                _eur(net_anteilig, sep),                            # net amount (antlg.)
+                vat_deadline.strftime("%d.%m.%Y"),                  # VAT deadline date
+                ig_str,                                             # IG
+                "",                                                 # ESt Betrag abzugsfähig (unused)
+                _eur(ig_vat_anteilig, sep) if ig_vat_anteilig is not None else "",  # IG VAT amount (antlg.)
             ])
