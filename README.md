@@ -62,7 +62,9 @@ pip install -e .
 fibutool --version
 ```
 
-Make sure Python's `Scripts` folder is on your PATH (the Python installer offers this option).
+Make sure Python's `Scripts` folder is on your PATH (the Python installer offers this option). You can identify the 
+correct scripts folder by looking on the output of the installation command above, e.g.
+`C:\Users\<username>\AppData\Roaming\Python\Python314\`.
 
 **Create the app directory and copy the example config:**
 
