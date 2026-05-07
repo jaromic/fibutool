@@ -93,6 +93,11 @@ Fields:
     - description: position text as printed
     - amount: the amount for this line item as printed on the invoice, decimal string with dot separator
     - vat_rate: VAT percentage for this position, integer 0–100
+    - If a line item is followed by sub-lines breaking down the tax by rate
+        (Austrian format: "davon X% USt: <net> <vat>"), split it into one position per sub-line.
+        Each split position uses the sub-line's VAT rate and net amount; the description is 
+        inherited from the parent line item.
+    
 - afa: true if this invoice is for a depreciable tangible asset (abnutzbares Wirtschaftsgut) that must be
     capitalised and depreciated — applies when net amount exceeds €1000 Anschaffungskosten, or for lower
     amounts if the asset is not independently usable as a GWG (geringwertiges Wirtschaftsgut);
