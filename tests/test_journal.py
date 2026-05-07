@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from journal import _eur, generate_csv
+from journal import _eur, _is_ig, _vat_forex_correction, generate_csv
 from models import InvoiceInfo, InvoicePosition, MatchResult, PaymentInfo
 
 
@@ -59,6 +59,45 @@ def _invoice(
 def _read_csv(path):
     with open(path, encoding="utf-8-sig") as f:
         return list(csv.reader(f, delimiter=";"))
+
+
+class TestIsIg:
+    def test_nonzero_rate_is_never_ig(self):
+        inv = _invoice(country="Deutschland")
+        assert _is_ig(20, inv) is False
+
+    def test_zero_rate_no_invoice_is_not_ig(self):
+        assert _is_ig(0, None) is False
+
+    def test_zero_rate_no_country_is_not_ig(self):
+        assert _is_ig(0, _invoice(country=None)) is False
+
+    def test_zero_rate_austrian_supplier_is_not_ig(self):
+        assert _is_ig(0, _invoice(country="Österreich")) is False
+
+    def test_zero_rate_german_supplier_is_ig(self):
+        assert _is_ig(0, _invoice(country="Deutschland")) is True
+
+    def test_zero_rate_swiss_supplier_is_ig(self):
+        assert _is_ig(0, _invoice(country="Schweiz")) is True
+
+
+class TestVatForexCorrection:
+    def test_no_forex_fee_returns_none(self):
+        assert _vat_forex_correction(20, Decimal("0"), Decimal("100.00")) is None
+
+    def test_zero_rate_returns_none(self):
+        assert _vat_forex_correction(0, Decimal("0.31"), Decimal("20.89")) is None
+
+    def test_20pct_rate_computed_correctly(self):
+        # effective_base=20.89, rate=20 → 20.89 * 20 / 120 = 3.4817 → 3.48
+        result = _vat_forex_correction(20, Decimal("0.31"), Decimal("20.89"))
+        assert result == Decimal("3.48")
+
+    def test_10pct_rate_computed_correctly(self):
+        # effective_base=100.00, rate=10 → 100 * 10 / 110 = 9.0909 → 9.09
+        result = _vat_forex_correction(10, Decimal("1.00"), Decimal("100.00"))
+        assert result == Decimal("9.09")
 
 
 class TestEur:

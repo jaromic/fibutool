@@ -24,7 +24,7 @@ fibutool is a CLI bookkeeping tool that processes bank payment receipts and invo
 **Invoice extraction** returns invoice positions (Rechnungspositionen) and the supplier's country in addition to header fields.  From these the pipeline derives:
 - **detail_category** — assigned by rule (`category_rules` in config, keyword → EÜR category); no LLM classification
 - **business_percentage** (Anteil) — assigned by rule (`business_percentage_rules` in config); defaults to 100 %
-- **IG** — set only when the supplier country is known and not Austria; domestic VAT-exempt invoices (e.g. insurance, SVS) are not marked IG
+- **IG** — set when the invoice carries a `vat_rate` of 0 (the LLM sets this for reverse-charge / IG Leistung wording) and the supplier country is known and not Austria; domestic VAT-exempt invoices (e.g. insurance, SVS) are not marked IG. **Known gap:** non-EU/EEA suppliers (e.g. Switzerland, UK) whose invoices show 0 % VAT for other reasons could be misclassified as IG; this is only triggered by an incorrectly issued invoice and is not addressed deliberately.
 - **AfA** — true when the invoice is for a depreciable asset (net > €1000, or not suitable as GWG)
 - **mixed VAT** — when positions carry different VAT rates the journal writes "mixed" and fills in the total VAT amount; otherwise the single rate is written and the amount is left for Excel to compute
 

@@ -1,12 +1,29 @@
 import csv
 from decimal import Decimal
 from pathlib import Path
+from typing import Optional
 
-from models import MatchResult
+from models import InvoiceInfo, MatchResult
 
 
 def _eur(d: Decimal, sep: str = ",") -> str:
     return str(d.quantize(Decimal("0.01"))).replace(".", sep)
+
+
+def _is_ig(rate: int, invoice: Optional[InvoiceInfo]) -> bool:
+    if rate != 0:
+        return False
+    if not invoice:
+        return False
+    # IG only applies to non-Austrian EU suppliers; domestic VAT-exempt is not IG
+    return invoice.country is not None and invoice.country != "Österreich"
+
+
+def _vat_forex_correction(rate: int, forex_fee: Decimal, effective_base: Decimal) -> Decimal | None:
+    """Return explicit VAT when a forex fee shifts the base; None lets Excel derive VAT from gross."""
+    if not forex_fee or rate == 0:
+        return None
+    return (effective_base * Decimal(rate) / Decimal(100 + rate)).quantize(Decimal("0.01"))
 
 
 def generate_csv(
@@ -55,21 +72,6 @@ def generate_csv(
             # gross stays as-is (the fee is also a business expense).
             effective_base = gross - payment.forex_fee
 
-            def _is_ig(rate: int) -> bool:
-                if rate != 0:
-                    return False
-                if not invoice:
-                    return False
-                # IG only applies to non-Austrian EU suppliers; domestic VAT-exempt is not IG
-                return invoice.country is not None and invoice.country != "Österreich"
-
-            def _explicit_vat(rate: int) -> Decimal | None:
-                # Only compute VAT explicitly when there is a forex fee to correct for
-                # and a non-zero rate; otherwise leave blank so Excel derives it from gross.
-                if not payment.forex_fee or rate == 0:
-                    return None
-                return (effective_base * Decimal(rate) / Decimal(100 + rate)).quantize(Decimal("0.01"))
-
             # VAT: derive from (active) positions when available (supports mixed rates)
             if active_positions:
                 rates = {p.vat_rate for p in active_positions}
@@ -80,16 +82,16 @@ def generate_csv(
                 else:
                     rate = next(iter(rates))
                     vat_str = f"{rate}%"
-                    vat_amount = _explicit_vat(rate)
-                    ig_str = "20" if _is_ig(rate) else ""
+                    vat_amount = _vat_forex_correction(rate, payment.forex_fee, effective_base)
+                    ig_str = "20" if _is_ig(rate, invoice) else ""
             elif invoice and invoice.vat_rate is not None:
                 rate = invoice.vat_rate
                 vat_str = f"{rate}%"
-                vat_amount = _explicit_vat(rate)
-                ig_str = "20" if _is_ig(rate) else ""
+                vat_amount = _vat_forex_correction(rate, payment.forex_fee, effective_base)
+                ig_str = "20" if _is_ig(rate, invoice) else ""
             else:
                 vat_str = "20%"
-                vat_amount = _explicit_vat(20)
+                vat_amount = _vat_forex_correction(20, payment.forex_fee, effective_base)
                 ig_str = ""
 
             writer.writerow([
