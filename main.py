@@ -159,6 +159,10 @@ def load_config(config_path: Path) -> dict:
 
 # ── Pipeline helpers ─────────────────────────────────────────────────────────
 
+def _glob_pdfs(directory: Path) -> list[Path]:
+    """Return sorted PDF paths from directory, case-insensitively (.pdf and .PDF)."""
+    return sorted(p for p in directory.iterdir() if p.suffix.lower() == ".pdf")
+
 def _extract_invoices(
     pdf_paths: list[Path],
     client,
@@ -200,7 +204,7 @@ def _full_mode(
             sys.exit(1)
         payment_pdfs = [args.only_payment]
     else:
-        payment_pdfs = sorted(payments_dir.glob("*.pdf"))
+        payment_pdfs = _glob_pdfs(payments_dir)
 
     if args.only_invoice:
         if not args.only_invoice.exists():
@@ -208,7 +212,7 @@ def _full_mode(
             sys.exit(1)
         invoice_pdfs = [args.only_invoice]
     else:
-        invoice_pdfs = sorted(invoices_dir.glob("*.pdf"))
+        invoice_pdfs = _glob_pdfs(invoices_dir)
 
     if not payment_pdfs:
         print(f"fibutool: no PDF files found in {payments_dir}", file=sys.stderr)
@@ -268,8 +272,8 @@ def _resume_mode(
     prev_results = load_results(match_cache_path)
     prev_invoices = load_all_invoices(match_cache_path)
 
-    already_seen = {inv.pdf_path for inv in prev_invoices}
-    new_invoice_pdfs = [p for p in sorted(invoices_dir.glob("*.pdf")) if p not in already_seen]
+    already_seen_names = {inv.pdf_path.name for inv in prev_invoices}
+    new_invoice_pdfs = [p for p in _glob_pdfs(invoices_dir) if p.name not in already_seen_names]
 
     print(f"\nStep 2: Extracting {len(new_invoice_pdfs)} new invoice(s)...")
     new_invoices, warnings = _extract_invoices(new_invoice_pdfs, client, category_rules, position_business_rules)
@@ -278,8 +282,10 @@ def _resume_mode(
     unmatched = [r for r in prev_results if r.invoice is None]
 
     if unmatched:
-        print(f"  Re-matching {len(unmatched)} previously unmatched payment(s)...")
-        rematched = match_payments([r.payment for r in unmatched], all_invoices, client)
+        already_matched_names = {r.invoice.pdf_path.name for r in prev_results if r.invoice is not None}
+        available_invoices = [inv for inv in all_invoices if inv.pdf_path.name not in already_matched_names]
+        print(f"  Re-matching {len(unmatched)} previously unmatched payment(s) against {len(available_invoices)} available invoice(s)...")
+        rematched = match_payments([r.payment for r in unmatched], available_invoices, client)
         for result in rematched:
             if result.invoice:
                 result.business_percentage = apply_percentage_rules(

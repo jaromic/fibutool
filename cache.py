@@ -14,8 +14,12 @@ class _Encoder(json.JSONEncoder):
         if isinstance(obj, date):
             return obj.isoformat()
         if isinstance(obj, Path):
-            return str(obj)
+            return obj.as_posix()
         return super().default(obj)
+
+
+def _path(s: str) -> Path:
+    return Path(s.replace("\\", "/"))
 
 
 def _position_from_dict(d: dict) -> InvoicePosition:
@@ -38,7 +42,7 @@ def _invoice_from_dict(d: dict) -> InvoiceInfo:
         net_total=Decimal(raw_net) if raw_net is not None else None,
         currency=d["currency"],
         counterparty=d["counterparty"],
-        pdf_path=Path(d["pdf_path"]),
+        pdf_path=_path(d["pdf_path"]),
         invoice_type=d.get("invoice_type", "incoming_invoice"),
         address=d.get("address"),
         country=d.get("country"),
@@ -58,9 +62,9 @@ def _payment_from_dict(d: dict) -> PaymentInfo:
         counterparty=d["counterparty"],
         direction=d["direction"],
         forex_fee=Decimal(d.get("forex_fee", "0")),
-        pdf_path=Path(d["pdf_path"]),
+        pdf_path=_path(d["pdf_path"]),
         address=d.get("address"),
-        ordered_path=Path(d["ordered_path"]) if d.get("ordered_path") else None,
+        ordered_path=_path(d["ordered_path"]) if d.get("ordered_path") else None,
         receipt_number=d.get("receipt_number"),
     )
 

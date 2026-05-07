@@ -15,14 +15,8 @@ Matching criteria (in order of importance):
 1. Company name: the most reliable signal. Allow abbreviations, GmbH/Ltd/OG variants, partial name
    matches, and minor spelling differences.
 2. Date: invoice date should be 0–21 days before booking date; occasionally wider gaps are acceptable.
-3. Amount: the payment amount should be close to the invoice amount. However, when an invoice covers
-   both business and non-business positions (e.g. a municipal bill that includes private items), the
-   payment may be significantly lower than the invoice total — a strong company name + date match is
-   sufficient in that case.
-   Currency mismatch (e.g. invoice in USD, payment in EUR) is normal for international services — the
-   bank converts the currency so the numeric amounts will differ. Do not treat a currency difference as
-   a reason to reject a match; if company name and date align, match it and note the currency difference
-   in the reason.
+3. Amount: the difference of payment amount and invoice amount must be < 1 EUR. Exception: Disregard amounts 
+   for foreign currency invoices (payment is in EUR). And note the currency difference in the reason.
 4. Direction: use as a supporting hint, not a hard filter.
    - outgoing payment (we paid) → prefer "incoming_invoice"
    - incoming payment (we received) → prefer "outgoing_invoice" or "credit_note"
