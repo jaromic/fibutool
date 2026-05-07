@@ -43,7 +43,7 @@ fibutool separates two concerns:
 - `payments/` and `invoices/` — input PDFs
 - `payments-ordered/`, `merged/` — output PDFs
 - `journal.csv` — output journal
-- `match_results.json` — intermediary: extracted + matched data (written after step 2; required for `--journal-only`)
+- `match_results.json` — intermediary: extracted + matched data (written after step 2; required for `--journal-only` and resume mode)
 - `<ISO-datetime>_fibutool.log` — full log of every run (stdout + stderr)
 
 ## Installation
@@ -112,6 +112,13 @@ fibutool -n 108
 :: Remove output from a previous run before re-running:
 fibutool -n 108 --clean
 
+:: Resume after adding missing invoices — if a previous run left unmatched payments,
+:: drop the missing invoice PDFs into invoices\ and re-run without --clean.
+:: fibutool detects match_results.json, extracts only the new invoices,
+:: re-matches the previously unmatched payments, and regenerates all output.
+:: -n is not required in resume mode (payments are already ordered):
+fibutool
+
 :: Regenerate journal.csv only (no API calls) — useful after editing journal rules:
 fibutool --journal-only
 
@@ -138,7 +145,7 @@ Every run writes a timestamped log file (`<ISO-datetime>_fibutool.log`) to the w
   payments-ordered/             ← output: payments renamed NNN_YYYY-MM-DD_<orig>.pdf
   merged/                       ← output: merged PDFs (invoice pages first, then payment)
   journal.csv                   ← output: journal rows ready for import into Excel
-  match_results.json            ← intermediary: extracted + matched data; required for --journal-only
+  match_results.json            ← intermediary: extracted + matched data; required for --journal-only and resume mode
   <ISO-datetime>_fibutool.log   ← log: full stdout + stderr for this run
 
 %APPDATA%\fibutool\             ← app directory; shared across all sessions

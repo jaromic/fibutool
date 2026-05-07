@@ -21,7 +21,7 @@ from pathlib import Path
 import anthropic
 import yaml
 
-from cache import load_results, save_results
+from cache import load_all_invoices, load_results, save_results
 from extractor import (
     apply_percentage_rules,
     extract_invoice_info,
@@ -34,6 +34,7 @@ from extractor import (
 from journal import generate_csv
 from matcher import match_payments
 from merger import merge_pdfs
+from models import InvoiceInfo, MatchResult
 from orderer import order_payments
 
 try:
@@ -99,6 +100,7 @@ def _preflight(
     csv_path: Path,
     clean: bool,
     journal_only: bool = False,
+    resume: bool = False,
     match_cache_path: Path = None,
 ) -> None:
     output_dirs = [merged_dir, payments_ordered_dir]
@@ -138,7 +140,7 @@ def _preflight(
         if csv_path.exists():
             print(f"fibutool: {csv_path} already exists; use --clean to remove it.", file=sys.stderr)
             sys.exit(1)
-    else:
+    elif not resume:
         conflicts = [str(d) for d in output_dirs if any(d.iterdir())]
         if csv_path.exists():
             conflicts.append(str(csv_path))
@@ -153,6 +155,149 @@ def _preflight(
 def load_config(config_path: Path) -> dict:
     with open(config_path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+# ── Pipeline helpers ─────────────────────────────────────────────────────────
+
+def _extract_invoices(
+    pdf_paths: list[Path],
+    client,
+    category_rules: dict,
+    position_business_rules: dict,
+) -> tuple[list[InvoiceInfo], list[str]]:
+    """Extract invoice info from PDFs. Returns (invoices, warnings)."""
+    invoices, warnings = [], []
+    for pdf_path in pdf_paths:
+        print(f"  {pdf_path.name} ... ", end="", flush=True)
+        try:
+            info = extract_invoice_info(pdf_path, client, category_rules, position_business_rules)
+            invoices.append(info)
+            print(f"{info.invoice_date}  {info.currency} {info.gross_total}  {info.counterparty}")
+            warnings.extend(validate_extracted_positions(info))
+        except Exception as e:
+            print(f"FAILED: {e}")
+            warnings.append(f"Invoice extraction failed for {pdf_path.name}: {e}")
+    return invoices, warnings
+
+
+def _full_mode(
+    args,
+    payments_dir: Path,
+    invoices_dir: Path,
+    payments_ordered_dir: Path,
+    match_cache_path: Path,
+    client,
+    config: dict,
+) -> tuple[list[MatchResult], list[str]]:
+    own_company_names: list[str] = config.get("own_company_names", [])
+    category_rules: dict = config.get("category_rules", {})
+    business_percentage_rules: dict = config.get("business_percentage_rules", {})
+    position_business_rules: dict = config.get("position_business_rules", {})
+
+    if args.only_payment:
+        if not args.only_payment.exists():
+            print(f"fibutool: --only-payment file not found: {args.only_payment}", file=sys.stderr)
+            sys.exit(1)
+        payment_pdfs = [args.only_payment]
+    else:
+        payment_pdfs = sorted(payments_dir.glob("*.pdf"))
+
+    if args.only_invoice:
+        if not args.only_invoice.exists():
+            print(f"fibutool: --only-invoice file not found: {args.only_invoice}", file=sys.stderr)
+            sys.exit(1)
+        invoice_pdfs = [args.only_invoice]
+    else:
+        invoice_pdfs = sorted(invoices_dir.glob("*.pdf"))
+
+    if not payment_pdfs:
+        print(f"fibutool: no PDF files found in {payments_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 1: Extract + order payments
+    print(f"Step 1: Extracting {len(payment_pdfs)} payment(s)...")
+    payments = []
+    for pdf_path in payment_pdfs:
+        print(f"  {pdf_path.name} ... ", end="", flush=True)
+        try:
+            info = extract_payment_info(pdf_path, client, own_company_names)
+            payments.append(info)
+            print(f"{info.booking_date}  {info.currency} {info.amount}  [{info.direction}]  {info.counterparty}")
+        except Exception as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+
+    if not payments:
+        print("fibutool: no payments could be extracted.", file=sys.stderr)
+        sys.exit(1)
+
+    sorted_payments = order_payments(payments_ordered_dir, args.last_receipt_number, payments)
+    print(f"  → {len(sorted_payments)} payments written to {payments_ordered_dir}/")
+
+    # Step 2: Extract invoices + match
+    print(f"\nStep 2: Extracting {len(invoice_pdfs)} invoice(s)...")
+    invoices, warnings = _extract_invoices(invoice_pdfs, client, category_rules, position_business_rules)
+
+    if invoice_pdfs and not invoices:
+        print("Warning: no invoices could be extracted — all payments will be unmatched.", file=sys.stderr)
+
+    print("  Matching payments to invoices...")
+    results = match_payments(sorted_payments, invoices, client)
+    for result in results:
+        if result.invoice:
+            result.business_percentage = apply_percentage_rules(
+                result.invoice.counterparty, business_percentage_rules
+            )
+
+    save_results(results, match_cache_path, all_invoices=invoices)
+    print(f"  Match cache saved → {match_cache_path}")
+
+    return results, warnings
+
+
+def _resume_mode(
+    invoices_dir: Path,
+    match_cache_path: Path,
+    client,
+    config: dict,
+) -> tuple[list[MatchResult], list[str]]:
+    category_rules: dict = config.get("category_rules", {})
+    business_percentage_rules: dict = config.get("business_percentage_rules", {})
+    position_business_rules: dict = config.get("position_business_rules", {})
+
+    print(f"Resume mode — loading previous results from {match_cache_path}")
+    prev_results = load_results(match_cache_path)
+    prev_invoices = load_all_invoices(match_cache_path)
+
+    already_seen = {inv.pdf_path for inv in prev_invoices}
+    new_invoice_pdfs = [p for p in sorted(invoices_dir.glob("*.pdf")) if p not in already_seen]
+
+    print(f"\nStep 2: Extracting {len(new_invoice_pdfs)} new invoice(s)...")
+    new_invoices, warnings = _extract_invoices(new_invoice_pdfs, client, category_rules, position_business_rules)
+
+    all_invoices = prev_invoices + new_invoices
+    unmatched = [r for r in prev_results if r.invoice is None]
+
+    if unmatched:
+        print(f"  Re-matching {len(unmatched)} previously unmatched payment(s)...")
+        rematched = match_payments([r.payment for r in unmatched], all_invoices, client)
+        for result in rematched:
+            if result.invoice:
+                result.business_percentage = apply_percentage_rules(
+                    result.invoice.counterparty, business_percentage_rules
+                )
+        rematched_by_path = {r.payment.pdf_path: r for r in rematched}
+    else:
+        rematched_by_path = {}
+
+    results = [
+        rematched_by_path.get(r.payment.pdf_path, r) if r.invoice is None else r
+        for r in prev_results
+    ]
+
+    save_results(results, match_cache_path, all_invoices=all_invoices)
+    print(f"  Match cache updated → {match_cache_path}")
+
+    return results, warnings
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
@@ -199,16 +344,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.journal_only and args.last_receipt_number is None:
-        parser.error("--last-receipt-number / -n is required unless --journal-only is set")
-
-    # Work directory: per-session data, logs, and intermediary files.
     workdir = args.workdir
+    match_cache_path = workdir / "match_results.json"
+    is_resume = match_cache_path.exists() and not args.clean and not args.journal_only
 
-    # Set up logging before any other output so every line lands in the log file.
+    if not args.journal_only and not is_resume and args.last_receipt_number is None:
+        parser.error("--last-receipt-number / -n is required unless --journal-only is set or resuming from cache")
+
     _setup_logging(workdir)
 
-    # App directory: resolve config path (explicit flag takes priority over platform default).
     config_path = args.config if args.config is not None else _default_config_path()
     print(f"fibutool {_VERSION}  |  config: {config_path}  |  workdir: {workdir.resolve()}")
 
@@ -217,10 +361,9 @@ def main() -> None:
     payments_ordered_dir = workdir / "payments-ordered"
     merged_dir = workdir / "merged"
     csv_path = workdir / "journal.csv"
-    match_cache_path = workdir / "match_results.json"
 
     _preflight(merged_dir, payments_ordered_dir, csv_path, args.clean,
-               journal_only=args.journal_only, match_cache_path=match_cache_path)
+               journal_only=args.journal_only, resume=is_resume, match_cache_path=match_cache_path)
 
     config = load_config(config_path)
     mixed_vat_label: str = config.get("mixed_vat_label", "gemischt")
@@ -228,96 +371,31 @@ def main() -> None:
     ig_vat_rate: int = config.get("ig_vat_rate", 20)
 
     invoice_extraction_warnings: list[str] = []
+
     if args.journal_only:
-        # ── Journal-only mode: load cached match results, regenerate CSV ──────
         print(f"Loading match cache from {match_cache_path}...")
         results = load_results(match_cache_path)
         print(f"  {len(results)} match result(s) loaded.")
     else:
-        own_company_names: list[str] = config.get("own_company_names", [])
-        category_rules: dict[str, str] = config.get("category_rules", {})
-        business_percentage_rules: dict[str, int] = config.get("business_percentage_rules", {})
-        position_business_rules: dict = config.get("position_business_rules", {})
-        mixed_vat_label: str = config.get("mixed_vat_label", "gemischt")
         try:
-            validate_category_rules(category_rules)
-            validate_business_percentage_rules(business_percentage_rules)
-            validate_position_business_rules(position_business_rules)
+            validate_category_rules(config.get("category_rules", {}))
+            validate_business_percentage_rules(config.get("business_percentage_rules", {}))
+            validate_position_business_rules(config.get("position_business_rules", {}))
         except ValueError as e:
             print(f"fibutool: config error — {e}", file=sys.stderr)
             sys.exit(1)
-        api_key: str = config.get("anthropic_api_key") or ""
-        client = anthropic.Anthropic(api_key=api_key or None)
+        client = anthropic.Anthropic(api_key=config.get("anthropic_api_key") or None)
 
-        if args.only_payment:
-            if not args.only_payment.exists():
-                print(f"fibutool: --only-payment file not found: {args.only_payment}", file=sys.stderr)
-                sys.exit(1)
-            payment_pdfs = [args.only_payment]
+        if is_resume:
+            results, invoice_extraction_warnings = _resume_mode(
+                invoices_dir, match_cache_path, client, config
+            )
         else:
-            payment_pdfs = sorted(p for p in payments_dir.glob("*.pdf"))
+            results, invoice_extraction_warnings = _full_mode(
+                args, payments_dir, invoices_dir, payments_ordered_dir, match_cache_path, client, config
+            )
 
-        if args.only_invoice:
-            if not args.only_invoice.exists():
-                print(f"fibutool: --only-invoice file not found: {args.only_invoice}", file=sys.stderr)
-                sys.exit(1)
-            invoice_pdfs = [args.only_invoice]
-        else:
-            invoice_pdfs = sorted(p for p in invoices_dir.glob("*.pdf"))
-
-        if not payment_pdfs:
-            print(f"fibutool: no PDF files found in {payments_dir}", file=sys.stderr)
-            sys.exit(1)
-
-        # ── Step 1: Extract + order payments ─────────────────────────────────
-        print(f"Step 1: Extracting {len(payment_pdfs)} payment(s)...")
-        payments = []
-        for pdf_path in payment_pdfs:
-            print(f"  {pdf_path.name} ... ", end="", flush=True)
-            try:
-                info = extract_payment_info(pdf_path, client, own_company_names)
-                payments.append(info)
-                print(f"{info.booking_date}  {info.currency} {info.amount}  [{info.direction}]  {info.counterparty}")
-            except Exception as e:
-                print(f"ERROR: {e}", file=sys.stderr)
-
-        if not payments:
-            print("fibutool: no payments could be extracted.", file=sys.stderr)
-            sys.exit(1)
-
-        sorted_payments = order_payments(payments_ordered_dir, args.last_receipt_number, payments)
-        print(f"  → {len(sorted_payments)} payments written to {payments_ordered_dir}/")
-
-        # ── Step 2: Extract invoices + match ──────────────────────────────────
-        print(f"\nStep 2: Extracting {len(invoice_pdfs)} invoice(s)...")
-        invoices = []
-        for pdf_path in invoice_pdfs:
-            print(f"  {pdf_path.name} ... ", end="", flush=True)
-            try:
-                info = extract_invoice_info(pdf_path, client, category_rules, position_business_rules)
-                invoices.append(info)
-                print(f"{info.invoice_date}  {info.currency} {info.gross_total}  {info.counterparty}")
-                for w in validate_extracted_positions(info):
-                    invoice_extraction_warnings.append(w)
-            except Exception as e:
-                print(f"FAILED: {e}")
-                invoice_extraction_warnings.append(f"Invoice extraction failed for {pdf_path.name}: {e}")
-
-        if invoice_pdfs and not invoices:
-            print("Warning: no invoices could be extracted — all payments will be unmatched.", file=sys.stderr)
-
-        print("  Matching payments to invoices...")
-        results = match_payments(sorted_payments, invoices, client)
-        for result in results:
-            if result.invoice:
-                result.business_percentage = apply_percentage_rules(
-                    result.invoice.counterparty, business_percentage_rules
-                )
-
-        save_results(results, match_cache_path, all_invoices=invoices)
-        print(f"  Match cache saved → {match_cache_path}")
-
-        # ── Step 3: Merge PDFs ────────────────────────────────────────────────
+        # Step 3: Merge PDFs
         print(f"\nStep 3: Merging PDFs into {merged_dir}/...")
         for result in results:
             out = merge_pdfs(result, merged_dir, decimal_separator)
@@ -326,11 +404,11 @@ def main() -> None:
             else:
                 print(f"  {out.name}  ⚠  no invoice matched")
 
-    # ── Step 4: CSV journal ──────────────────────────────────────────────────
+    # Step 4: CSV journal
     generate_csv(results, csv_path, mixed_vat_label, decimal_separator, ig_vat_rate)
     print(f"\nStep 4: Journal written → {csv_path}")
 
-    # ── Summary ──────────────────────────────────────────────────────────────
+    # Summary
     warnings = invoice_extraction_warnings + [w for r in results for w in r.warnings]
     if warnings:
         print("\nWarnings:")

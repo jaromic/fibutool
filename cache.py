@@ -77,6 +77,13 @@ def save_results(
     path.write_text(json.dumps(data, indent=2, cls=_Encoder), encoding="utf-8")
 
 
+def load_all_invoices(path: Path) -> list[InvoiceInfo]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(raw, dict):
+        return [_invoice_from_dict(d) for d in raw.get("invoices", [])]
+    return []
+
+
 def load_results(path: Path) -> list[MatchResult]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     items = raw["matches"] if isinstance(raw, dict) else raw
