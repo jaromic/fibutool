@@ -41,7 +41,7 @@ class InvoiceInfo:
     country: Optional[str] = None           # supplier country in German, e.g. "Österreich"
     vat_rate: Optional[int] = None          # VAT percentage 0-100 as shown on the invoice
     net_total: Optional[Decimal] = None     # net total from invoice summary, if shown
-    positions: list = field(default_factory=list)  # list[InvoicePosition]
+    positions: list["InvoicePosition"] = field(default_factory=list)
     detail_category: Optional[str] = None
     afa: bool = False
     matched: bool = False
@@ -52,5 +52,5 @@ class MatchResult:
     payment: PaymentInfo
     invoice: Optional[InvoiceInfo]
     match_reason: str = ""
-    warnings: list = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     business_percentage: float = 100.0
