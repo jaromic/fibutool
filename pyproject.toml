@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "fibutool"
+description = "Austrian bookkeeping PDF processor"
+requires-python = ">=3.12"
+dynamic = ["version"]
+dependencies = [
+    "pypdf>=4.0",
+    "anthropic>=0.50",
+    "pyyaml>=6.0",
+    "reportlab>=4.0",
+]
+
+[project.scripts]
+# Makes `fibutool` available as a command on the system PATH after installation.
+# One-time setup:  pip install -e .
+# Switch version:  git checkout v1.x.x && pip install -e .
+# Verify:          fibutool --version
+fibutool = "main:main"
+
+[tool.setuptools]
+# Flat layout: all modules are top-level .py files, no package subdirectory.
+py-modules = [
+    "api", "cache", "extractor", "journal", "main",
+    "matcher", "merger", "models", "orderer", "overview", "splitter",
+]
+
+[tool.setuptools_scm]
+# Version is derived from git tags at install time.
+# To cut a release:
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#   pip install -e .        ← reinstall so fibutool --version reflects the new tag

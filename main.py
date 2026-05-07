@@ -1,6 +1,21 @@
+"""fibutool — bookkeeping PDF processor.
+
+Two-directory model
+-------------------
+App directory  — shared across all sessions; holds config and the installed executable.
+               Windows default: %APPDATA%\\fibutool\\
+               Override with:   --config <path>
+
+Work directory — per-session; holds input PDFs, output files, log, and intermediary data.
+               Default: current working directory (cd into the session folder, then run fibutool)
+               Override with:   --workdir <path>
+"""
+
 import argparse
+import os
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import anthropic
@@ -21,6 +36,62 @@ from matcher import match_payments
 from merger import merge_pdfs
 from orderer import order_payments
 
+try:
+    from importlib.metadata import version as _pkg_version
+    _VERSION = _pkg_version("fibutool")
+except Exception:
+    _VERSION = "dev"
+
+
+# ── Directory helpers ────────────────────────────────────────────────────────
+
+def _default_config_path() -> Path:
+    """Return the platform-specific app-directory config path.
+
+    App directory: shared across sessions; survives session folder changes.
+      Windows : %APPDATA%\\fibutool\\config.yaml
+      Other   : ~/.config/fibutool/config.yaml
+    """
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "fibutool" / "config.yaml"
+    return Path.home() / ".config" / "fibutool" / "config.yaml"
+
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+
+class _Tee:
+    """Forward writes to multiple streams — copies console output to a log file."""
+
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, text):
+        for s in self._streams:
+            s.write(text)
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
+
+def _setup_logging(workdir: Path) -> None:
+    """Open a timestamped log file in the work directory and tee stdout/stderr to it.
+
+    Log filename: <ISO-datetime>_fibutool.log
+    Falls back to console-only if the log file cannot be opened.
+    """
+    ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    log_path = workdir / f"{ts}_fibutool.log"
+    try:
+        log_file = open(log_path, "w", encoding="utf-8")
+        sys.stdout = _Tee(sys.__stdout__, log_file)
+        sys.stderr = _Tee(sys.__stderr__, log_file)
+    except OSError as e:
+        print(f"fibutool: warning — could not open log file {log_path}: {e}", file=sys.stderr)
+
+
+# ── Preflight ────────────────────────────────────────────────────────────────
 
 def _preflight(
     merged_dir: Path,
@@ -84,8 +155,7 @@ def load_config(config_path: Path) -> dict:
         return yaml.safe_load(f)
 
 
-VERSION = "0.9.1"
-
+# ── Entry point ──────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -93,7 +163,7 @@ def main() -> None:
         description="fibutool — bookkeeping PDF processor",
     )
     parser.add_argument(
-        "--version", "-V", action="version", version=f"%(prog)s {VERSION}",
+        "--version", "-V", action="version", version=f"%(prog)s {_VERSION}",
     )
     parser.add_argument(
         "--last-receipt-number", "-n", type=int, default=None, metavar="N",
@@ -101,11 +171,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--workdir", "-w", type=Path, default=Path("."), metavar="DIR",
-        help="Working directory containing payments/, invoices/, merged/, payments-ordered/ and journal.csv (default: .)",
+        # Work directory: per-session data, logs, and intermediary files.
+        # Defaults to the current directory so you can cd into the session folder and run fibutool.
+        help="Work directory: per-session PDFs, output files, and logs (default: current directory)",
     )
     parser.add_argument(
-        "--config", "-c", type=Path, default=Path("config.yaml"), metavar="FILE",
-        help="Config file (default: ./config.yaml)",
+        "--config", "-c", type=Path, default=None, metavar="FILE",
+        # App directory: shared config, survives across sessions.
+        # Default is platform-specific; see _default_config_path().
+        help=f"Config file (default: {_default_config_path()})",
     )
     parser.add_argument(
         "--clean", action="store_true",
@@ -128,7 +202,16 @@ def main() -> None:
     if not args.journal_only and args.last_receipt_number is None:
         parser.error("--last-receipt-number / -n is required unless --journal-only is set")
 
+    # Work directory: per-session data, logs, and intermediary files.
     workdir = args.workdir
+
+    # Set up logging before any other output so every line lands in the log file.
+    _setup_logging(workdir)
+
+    # App directory: resolve config path (explicit flag takes priority over platform default).
+    config_path = args.config if args.config is not None else _default_config_path()
+    print(f"fibutool {_VERSION}  |  config: {config_path}  |  workdir: {workdir.resolve()}")
+
     payments_dir = workdir / "payments"
     invoices_dir = workdir / "invoices"
     payments_ordered_dir = workdir / "payments-ordered"
@@ -139,7 +222,7 @@ def main() -> None:
     _preflight(merged_dir, payments_ordered_dir, csv_path, args.clean,
                journal_only=args.journal_only, match_cache_path=match_cache_path)
 
-    config = load_config(args.config)
+    config = load_config(config_path)
     mixed_vat_label: str = config.get("mixed_vat_label", "gemischt")
     decimal_separator: str = config.get("decimal_separator", ",")
     ig_vat_rate: int = config.get("ig_vat_rate", 20)
