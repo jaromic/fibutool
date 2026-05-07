@@ -3,3 +3,4 @@ test_data*
 config.yaml
 /BACKLOG
 /.claude/settings.local.json
+CLAUDE.local.md
