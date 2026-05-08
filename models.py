@@ -44,6 +44,7 @@ class InvoiceInfo:
     positions: list["InvoicePosition"] = field(default_factory=list)
     detail_category: Optional[str] = None
     afa: bool = False
+    reverse_charge: bool = False
     matched: bool = False
 
 

@@ -3,6 +3,8 @@ anthropic_api_key: sk-ant-...
 mixed_vat_label: "gemischt"
 decimal_separator: ","
 ig_vat_rate: 20
+default_einnahmen_category: "Waren-/Leistungserlöse"
+default_ausgaben_category: "sonstige Betriebsausgaben"
 
 own_company_names:
   - MyCompany GmbH

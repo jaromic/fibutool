@@ -1,4 +1,6 @@
 import json
+from datetime import datetime
+from pathlib import Path
 
 import anthropic
 
@@ -17,12 +19,9 @@ Matching criteria (in order of importance):
 2. Date: invoice date should be 0–21 days before booking date; occasionally wider gaps are acceptable.
 3. Amount: the difference of payment amount and invoice amount must be < 1 EUR. Exception: Disregard amounts 
    for foreign currency invoices (payment is in EUR). And note the currency difference in the reason.
-4. Direction: use as a supporting hint, not a hard filter.
-   - outgoing payment (we paid) → prefer "incoming_invoice"
-   - incoming payment (we received) → prefer "outgoing_invoice" or "credit_note"
-   Direction in the payment data can be wrong; SEPA direct debits (Lastschrift) where another party
-   pulls money from our account are sometimes misclassified as "incoming". If company name, date, and
-   amount match well but direction conflicts, still make the match and note the conflict in the reason.
+4. Direction:
+   - outgoing payment (we paid) → match "incoming_invoice" only
+   - incoming payment (we received) → match "outgoing_invoice" or "credit_note"
 
 Return a JSON array with one entry per payment, in the same order as the input payments list:
 [
@@ -30,7 +29,9 @@ Return a JSON array with one entry per payment, in the same order as the input p
   {"payment_index": 1, "invoice_index": null, "reason": "no plausible match"},
   ...
 ]
-Set invoice_index to null if no plausible match exists. No markdown, no explanation outside the JSON.\
+Set invoice_index to null if no plausible match exists.
+In the reason, always refer to payments and invoices by their filename, not by index number.
+No markdown, no explanation outside the JSON.\
 """
 
 
@@ -44,7 +45,7 @@ def match_payments(
             MatchResult(
                 payment=p,
                 invoice=None,
-                warnings=[f"No invoices available — {p.pdf_path.name} unmatched"],
+                warnings=[f"[{__name__}] No invoices available — {p.pdf_path.name} unmatched"],
             )
             for p in payments
         ]
@@ -108,15 +109,19 @@ def match_payments(
     text_block = next((b.text for b in response.content if b.type == "text"), None)
     if not text_block:
         return [
-            MatchResult(payment=p, invoice=None, warnings=["LLM returned no response"])
+            MatchResult(payment=p, invoice=None, warnings=[f"[{__name__}] {p.pdf_path.name}: LLM returned no response"])
             for p in payments
         ]
 
     try:
         assignments = json.loads(text_block.strip())
     except json.JSONDecodeError as e:
+        debug_path = Path(".") / f"llm_debug_matcher_{datetime.now().strftime('%Y%m%dT%H%M%S')}.txt"
+        debug_path.write_text(text_block, encoding="utf-8")
         return [
-            MatchResult(payment=p, invoice=None, warnings=[f"LLM returned invalid JSON: {e}"])
+            MatchResult(payment=p, invoice=None, warnings=[
+                f"[{__name__}] {p.pdf_path.name}: LLM returned invalid JSON: {e} — full response saved to {debug_path}"
+            ])
             for p in payments
         ]
 
@@ -135,7 +140,7 @@ def match_payments(
             results.append(MatchResult(
                 payment=payment,
                 invoice=None,
-                warnings=[f"No assignment returned for {payment.pdf_path.name}"],
+                warnings=[f"[{__name__}] {payment.pdf_path.name}: no assignment returned by LLM"],
             ))
             continue
 
@@ -154,9 +159,9 @@ def match_payments(
             results.append(MatchResult(payment=payment, invoice=invoice, match_reason=reason))
         else:
             if idx in used_invoice_indices:
-                warn = f"Duplicate invoice assignment rejected for {payment.pdf_path.name}"
+                warn = f"[{__name__}] {payment.pdf_path.name}: duplicate invoice assignment rejected"
             else:
-                warn = f"No invoice matched for {payment.pdf_path.name}: {reason or 'no reason given'}"
+                warn = f"[{__name__}] {payment.pdf_path.name}: no invoice matched — {reason or 'no reason given'}"
             results.append(MatchResult(payment=payment, invoice=None, match_reason=reason, warnings=[warn]))
 
     return results

@@ -11,13 +11,8 @@ def _eur(d: Decimal, sep: str = ",") -> str:
     return str(d.quantize(Decimal("0.01"))).replace(".", sep)
 
 
-def _is_ig(rate: int, invoice: Optional[InvoiceInfo]) -> bool:
-    if rate != 0:
-        return False
-    if not invoice:
-        return False
-    # IG only applies to non-Austrian EU suppliers; domestic VAT-exempt is not IG
-    return invoice.country is not None and invoice.country != "Österreich"
+def _is_ig(invoice: Optional[InvoiceInfo]) -> bool:
+    return bool(invoice and invoice.reverse_charge)
 
 
 def _vat_deadline(booking_date: date) -> date:
@@ -36,6 +31,8 @@ def generate_csv(
     mixed_vat_label: str = "gemischt",
     decimal_separator: str = ",",
     ig_vat_rate: int = 20,
+    default_einnahmen_category: str = "Waren-/Leistungserlöse",
+    default_ausgaben_category: str = "sonstige Betriebsausgaben",
 ) -> None:
     # utf-8-sig adds BOM so Excel opens it correctly; semicolon is the EU CSV delimiter
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -46,16 +43,23 @@ def generate_csv(
             payment = result.payment
             invoice = result.invoice
 
-            if payment.direction == "incoming":
+            is_revenue = (
+                payment.direction == "incoming"
+                and invoice is not None
+                and invoice.invoice_type in {"outgoing_invoice", "credit_note"}
+            )
+            if is_revenue:
                 category = "Einnahmen"
-                detail_category = "Waren-/Leistungserlöse"
-                name = invoice.counterparty if invoice else payment.counterparty
-                address = invoice.address if invoice else payment.address
+                detail_category = default_einnahmen_category
+                name = invoice.counterparty
+                address = invoice.address
             else:
+                # outgoing payments and incoming payments without a revenue-type invoice
+                # (e.g. refunds) are both booked as Ausgaben
                 category = "Ausgaben"
                 detail_category = (
                     invoice.detail_category if invoice and invoice.detail_category
-                    else "sonstige Betriebsausgaben"
+                    else default_ausgaben_category
                 )
                 name = invoice.counterparty if invoice else payment.counterparty
                 address = invoice.address if invoice else payment.address
@@ -91,12 +95,12 @@ def generate_csv(
                     rate = next(iter(rates))
                     vat_str = f"{rate}%"
                     vat_amount = sum(p.vat_amount for p in active_positions)
-                    ig_str = str(ig_vat_rate) if _is_ig(rate, invoice) else ""
+                    ig_str = str(ig_vat_rate) if _is_ig(invoice) else ""
             elif invoice and invoice.vat_rate is not None:
                 rate = invoice.vat_rate
                 vat_str = f"{rate}%"
                 vat_amount = (effective_base * Decimal(rate) / Decimal(100 + rate)).quantize(Decimal("0.01"))
-                ig_str = str(ig_vat_rate) if _is_ig(rate, invoice) else ""
+                ig_str = str(ig_vat_rate) if _is_ig(invoice) else ""
             else:
                 vat_str = "20%"
                 vat_amount = (effective_base * Decimal(20) / Decimal(120)).quantize(Decimal("0.01"))
@@ -118,6 +122,10 @@ def generate_csv(
                 if ig_str else None
             )
 
+            # Refunds are incoming payments booked as Ausgaben; negate all monetary amounts
+            # so they reduce the expense total rather than adding to it.
+            sign = Decimal("-1") if (category == "Ausgaben" and payment.direction == "incoming") else Decimal("1")
+
             writer.writerow([
                 payment.booking_date.year,                          # year
                 f"{payment.receipt_number:03d}",                    # receipt number
@@ -128,16 +136,16 @@ def generate_csv(
                 "",                                                 # empty
                 "",                                                 # Weiterverkauf
                 afa_str,                                            # AfA
-                _eur(gross, sep),                                   # amount incl. VAT
-                _eur(gross_anteilig, sep),                          # amount incl. VAT (antlg.)
-                f"{percentage_for_business:g}%".replace(".", sep), # Anteil
+                _eur(gross * sign, sep),                            # amount incl. VAT
+                _eur(gross_anteilig * sign, sep),                   # amount incl. VAT (antlg.)
+                f"{percentage_for_business:g}%".replace(".", sep),  # Anteil
                 vat_str,                                            # VAT percent
-                _eur(vat_amount, sep),                              # VAT amount
-                _eur(vat_anteilig, sep),                            # VAT amount (antlg.)
-                _eur(net, sep),                                     # net amount
-                _eur(net_anteilig, sep),                            # net amount (antlg.)
+                _eur(vat_amount * sign, sep),                       # VAT amount
+                _eur(vat_anteilig * sign, sep),                     # VAT amount (antlg.)
+                _eur(net * sign, sep),                              # net amount
+                _eur(net_anteilig * sign, sep),                     # net amount (antlg.)
                 vat_deadline.strftime("%d.%m.%Y"),                  # VAT deadline date
                 ig_str,                                             # IG
                 "",                                                 # ESt Betrag abzugsfähig (unused)
-                _eur(ig_vat_anteilig, sep) if ig_vat_anteilig is not None else "",  # IG VAT amount (antlg.)
+                _eur(ig_vat_anteilig * sign, sep) if ig_vat_anteilig is not None else "",  # IG VAT amount (antlg.)
             ])

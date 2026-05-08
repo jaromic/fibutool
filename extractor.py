@@ -1,7 +1,7 @@
 import base64
 import json
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Optional
@@ -21,8 +21,10 @@ Fields:
 - currency: 3-letter currency code (e.g. "EUR")
 - counterparty: name of the other party (recipient for outgoing payments, sender for incoming)
 - direction: "outgoing" if money left our account, "incoming" if money entered our account.
-  Key indicator: a minus sign on the amount means debit (we paid → "outgoing");
-  no minus sign / positive amount means credit (we received → "incoming")
+  Determine this solely from the sign of the amount on the bank statement line — ignore the
+  document type or payment description:
+    minus sign on the amount → "outgoing" (we paid / debit)
+    no minus sign / positive amount → "incoming" (we received / credit, including refunds)
 - forex_fee: foreign currency fee (Fremdwährungsentgelt) as a positive decimal string if shown
   separately on the receipt, otherwise "0"\
 """
@@ -56,10 +58,6 @@ DETAIL_CATEGORIES = [
     "Übrige Erträge",
 ]
 
-_CATEGORY_DEFAULT_INCOMING = "sonstige Betriebsausgaben"
-_CATEGORY_DEFAULT_OUTGOING = "Waren-/Leistungserlöse"
-
-
 def validate_category_rules(rules: dict[str, str]) -> None:
     invalid = [cat for cat in rules.values() if cat not in DETAIL_CATEGORIES]
     if invalid:
@@ -78,10 +76,16 @@ Fields:
 - invoice_date: invoice date in ISO format YYYY-MM-DD
 - amount: total amount including VAT as decimal string with dot as separator, always positive (e.g. "1234.56")
 - currency: 3-letter currency code (e.g. "EUR")
-- invoice_type: classify the document —
-    "incoming_invoice" if it is a bill/Rechnung addressed to us (we have to pay),
-    "outgoing_invoice" if it is an invoice we issued to someone else (they pay us),
-    "credit_note" if it is a Gutschrift/credit note sent to us by another company (we receive money)
+- invoice_type: classify the invoice document itself — who issued it and who received it.
+    The RECIPIENT of the invoice is the entity it is addressed to: look for a prominent address block
+    centre-left (the envelope-window position), or a label such as "Bill to", "Rechnungsempfänger",
+    "An:", or similar. The ISSUER is usually in a smaller block top-right, in a header, or at the
+    bottom of the page.
+    "incoming_invoice" — the invoice was issued by another company and addressed to us (we are the
+        recipient; we owe payment to the issuer).
+    "outgoing_invoice" — we issued this invoice to another company (the other company is the
+        recipient; they owe payment to us).
+    "credit_note" — a Gutschrift/credit note addressed to us by another company (we receive money).
 - counterparty: the other company's name (issuer for incoming invoices and credit notes, recipient for outgoing invoices)
 - street: street address of the counterparty, or null if not shown
 - postal_code: postal code of the counterparty, or null if not shown
@@ -98,6 +102,10 @@ Fields:
         Each split position uses the sub-line's VAT rate and net amount; the description is 
         inherited from the parent line item.
     
+- reverse_charge: true if the invoice explicitly indicates that VAT is to be accounted for by the
+    recipient under reverse charge — look for terms such as "Reverse Charge", "innergemeinschaftliche
+    Leistung", "IG Leistung", "Steuerschuldumkehr", "§13b UStG", "§19 UStG", "Article 196",
+    "Leistungsempfänger schuldet die Steuer", or a VAT line showing 0% with such a note; false otherwise
 - afa: true if this invoice is for a depreciable tangible asset (abnutzbares Wirtschaftsgut) that must be
     capitalised and depreciated — applies when net amount exceeds €1000 Anschaffungskosten, or for lower
     amounts if the asset is not independently usable as a GWG (geringwertiges Wirtschaftsgut);
@@ -111,14 +119,16 @@ def _apply_category_rules(
     counterparty: str,
     invoice_type: str,
     rules: dict[str, str],
+    default_ausgaben_category: str = "sonstige Betriebsausgaben",
+    default_einnahmen_category: str = "Waren-/Leistungserlöse",
 ) -> str:
     cp_lower = counterparty.lower()
     for keyword, category in rules.items():
         if keyword.lower() in cp_lower:
             return category
     if invoice_type == "incoming_invoice":
-        return _CATEGORY_DEFAULT_INCOMING
-    return _CATEGORY_DEFAULT_OUTGOING
+        return default_ausgaben_category
+    return default_einnahmen_category
 
 
 def apply_percentage_rules(counterparty: str, rules: dict[str, float]) -> float:
@@ -219,13 +229,13 @@ def validate_extracted_positions(invoice: "InvoiceInfo") -> list[str]:
     for i, p in enumerate(invoice.positions):
         if abs(p.net_amount + p.vat_amount - p.gross_amount) > tol_pos:
             warnings.append(
-                f"{invoice.pdf_path.name}: position {i + 1} ({p.description[:30]!r})"
+                f"[{__name__}] {invoice.pdf_path.name}: position {i + 1} ({p.description[:30]!r})"
                 f" net {p.net_amount} + vat {p.vat_amount} ≠ gross {p.gross_amount}"
             )
     pos_sum = sum(p.gross_amount for p in invoice.positions)
     if abs(pos_sum - invoice.gross_total) > Decimal("0.05"):
         warnings.append(
-            f"{invoice.pdf_path.name}: position gross sum {pos_sum} ≠ invoice amount {invoice.gross_total}"
+            f"[{__name__}] {invoice.pdf_path.name}: position gross sum {pos_sum} ≠ invoice amount {invoice.gross_total}"
             f" (gap: {invoice.gross_total - pos_sum})"
         )
     return warnings
@@ -335,7 +345,13 @@ def _call_claude(
     text_block = next((b.text for b in response.content if b.type == "text"), None)
     if not text_block:
         raise ValueError(f"LLM returned no text (stop_reason={response.stop_reason!r}, content types={[b.type for b in response.content]})")
-    return _parse_json(text_block)
+    try:
+        return _parse_json(text_block)
+    except ValueError as e:
+        ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        debug_path = Path(".") / f"{ts}_llm_debug_{pdf_path.stem}.txt"
+        debug_path.write_text(text_block, encoding="utf-8")
+        raise ValueError(f"{e} — full response saved to {debug_path}") from None
 
 
 def extract_payment_info(
@@ -366,8 +382,21 @@ def extract_invoice_info(
     client: anthropic.Anthropic,
     category_rules: dict[str, str] | None = None,
     position_business_rules: dict | None = None,
+    default_ausgaben_category: str = "sonstige Betriebsausgaben",
+    default_einnahmen_category: str = "Waren-/Leistungserlöse",
+    own_company_names: list[str] | None = None,
 ) -> InvoiceInfo:
-    data = _call_claude(pdf_path, client, INVOICE_SYSTEM_PROMPT, max_tokens=4096)
+    if own_company_names:
+        names_str = ", ".join(f'"{n}"' for n in own_company_names)
+        prefix = (
+            f"Our company name(s): {names_str}. "
+            "If the ISSUER of the invoice is any of these names, classify as "
+            '"outgoing_invoice" and set counterparty to the RECIPIENT (the other company), not to us.\n\n'
+        )
+        system_prompt = prefix + INVOICE_SYSTEM_PROMPT
+    else:
+        system_prompt = INVOICE_SYSTEM_PROMPT
+    data = _call_claude(pdf_path, client, system_prompt, max_tokens=4096)
     raw_vat = data.get("vat_rate")
     invoice_type = data.get("invoice_type", "incoming_invoice")
     counterparty = data["counterparty"]
@@ -393,7 +422,11 @@ def extract_invoice_info(
         country=data.get("country"),
         vat_rate=int(raw_vat) if raw_vat is not None else None,
         positions=positions,
-        detail_category=_apply_category_rules(counterparty, invoice_type, category_rules or {}),
+        detail_category=_apply_category_rules(
+            counterparty, invoice_type, category_rules or {},
+            default_ausgaben_category, default_einnahmen_category,
+        ),
         afa=bool(data.get("afa", False)),
+        reverse_charge=bool(data.get("reverse_charge", False)),
         pdf_path=pdf_path,
     )

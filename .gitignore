@@ -5,3 +5,4 @@ config.yaml
 /.claude/settings.local.json
 CLAUDE.local.md
 *.log
+/_check_journal.py

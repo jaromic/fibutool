@@ -168,19 +168,26 @@ def _extract_invoices(
     client,
     category_rules: dict,
     position_business_rules: dict,
+    default_ausgaben_category: str = "sonstige Betriebsausgaben",
+    default_einnahmen_category: str = "Waren-/Leistungserlöse",
+    own_company_names: list[str] | None = None,
 ) -> tuple[list[InvoiceInfo], list[str]]:
     """Extract invoice info from PDFs. Returns (invoices, warnings)."""
     invoices, warnings = [], []
     for pdf_path in pdf_paths:
         print(f"  {pdf_path.name} ... ", end="", flush=True)
         try:
-            info = extract_invoice_info(pdf_path, client, category_rules, position_business_rules)
+            info = extract_invoice_info(
+                pdf_path, client, category_rules, position_business_rules,
+                default_ausgaben_category, default_einnahmen_category,
+                own_company_names=own_company_names,
+            )
             invoices.append(info)
             print(f"{info.invoice_date}  {info.currency} {info.gross_total}  {info.counterparty}")
             warnings.extend(validate_extracted_positions(info))
         except Exception as e:
             print(f"FAILED: {e}")
-            warnings.append(f"Invoice extraction failed for {pdf_path.name}: {e}")
+            warnings.append(f"[main] {pdf_path.name}: invoice extraction failed: {e}")
     return invoices, warnings
 
 
@@ -221,12 +228,20 @@ def _full_mode(
     # Step 1: Extract + order payments
     print(f"Step 1: Extracting {len(payment_pdfs)} payment(s)...")
     payments = []
+    payment_warnings: list[str] = []
     for pdf_path in payment_pdfs:
         print(f"  {pdf_path.name} ... ", end="", flush=True)
         try:
             info = extract_payment_info(pdf_path, client, own_company_names)
             payments.append(info)
             print(f"{info.booking_date}  {info.currency} {info.amount}  [{info.direction}]  {info.counterparty}")
+            if info.direction == "incoming" and any(
+                name.lower() in info.counterparty.lower() for name in own_company_names
+            ):
+                payment_warnings.append(
+                    f"[extractor] {pdf_path.name}: incoming payment has own company name as counterparty"
+                    f" — LLM likely extracted our account name instead of the sender's name"
+                )
         except Exception as e:
             print(f"ERROR: {e}", file=sys.stderr)
 
@@ -237,9 +252,16 @@ def _full_mode(
     sorted_payments = order_payments(payments_ordered_dir, args.last_receipt_number, payments)
     print(f"  → {len(sorted_payments)} payments written to {payments_ordered_dir}/")
 
+    default_ausgaben_category: str = config.get("default_ausgaben_category", "sonstige Betriebsausgaben")
+    default_einnahmen_category: str = config.get("default_einnahmen_category", "Waren-/Leistungserlöse")
+
     # Step 2: Extract invoices + match
     print(f"\nStep 2: Extracting {len(invoice_pdfs)} invoice(s)...")
-    invoices, warnings = _extract_invoices(invoice_pdfs, client, category_rules, position_business_rules)
+    invoices, invoice_warnings = _extract_invoices(
+        invoice_pdfs, client, category_rules, position_business_rules,
+        default_ausgaben_category, default_einnahmen_category,
+        own_company_names=own_company_names,
+    )
 
     if invoice_pdfs and not invoices:
         print("Warning: no invoices could be extracted — all payments will be unmatched.", file=sys.stderr)
@@ -255,7 +277,7 @@ def _full_mode(
     save_results(results, match_cache_path, all_invoices=invoices)
     print(f"  Match cache saved → {match_cache_path}")
 
-    return results, warnings
+    return results, payment_warnings + invoice_warnings
 
 
 def _resume_mode(
@@ -275,8 +297,16 @@ def _resume_mode(
     already_seen_names = {inv.pdf_path.name for inv in prev_invoices}
     new_invoice_pdfs = [p for p in _glob_pdfs(invoices_dir) if p.name not in already_seen_names]
 
+    default_ausgaben_category: str = config.get("default_ausgaben_category", "sonstige Betriebsausgaben")
+    default_einnahmen_category: str = config.get("default_einnahmen_category", "Waren-/Leistungserlöse")
+    own_company_names: list[str] = config.get("own_company_names", [])
+
     print(f"\nStep 2: Extracting {len(new_invoice_pdfs)} new invoice(s)...")
-    new_invoices, warnings = _extract_invoices(new_invoice_pdfs, client, category_rules, position_business_rules)
+    new_invoices, warnings = _extract_invoices(
+        new_invoice_pdfs, client, category_rules, position_business_rules,
+        default_ausgaben_category, default_einnahmen_category,
+        own_company_names=own_company_names,
+    )
 
     all_invoices = prev_invoices + new_invoices
     unmatched = [r for r in prev_results if r.invoice is None]
@@ -375,6 +405,8 @@ def main() -> None:
     mixed_vat_label: str = config.get("mixed_vat_label", "gemischt")
     decimal_separator: str = config.get("decimal_separator", ",")
     ig_vat_rate: int = config.get("ig_vat_rate", 20)
+    default_einnahmen_category: str = config.get("default_einnahmen_category", "Waren-/Leistungserlöse")
+    default_ausgaben_category: str = config.get("default_ausgaben_category", "sonstige Betriebsausgaben")
 
     invoice_extraction_warnings: list[str] = []
 
@@ -411,7 +443,8 @@ def main() -> None:
                 print(f"  {out.name}  ⚠  no invoice matched")
 
     # Step 4: CSV journal
-    generate_csv(results, csv_path, mixed_vat_label, decimal_separator, ig_vat_rate)
+    generate_csv(results, csv_path, mixed_vat_label, decimal_separator, ig_vat_rate,
+                 default_einnahmen_category, default_ausgaben_category)
     print(f"\nStep 4: Journal written → {csv_path}")
 
     # Summary

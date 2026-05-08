@@ -50,6 +50,7 @@ def _invoice_from_dict(d: dict) -> InvoiceInfo:
         positions=[_position_from_dict(p) for p in d.get("positions", [])],
         detail_category=d.get("detail_category"),
         afa=d.get("afa", False),
+        reverse_charge=d.get("reverse_charge", False),
         matched=d.get("matched", False),
     )
 

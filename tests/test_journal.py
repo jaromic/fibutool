@@ -40,6 +40,7 @@ def _invoice(
     detail_category=None,
     afa=False,
     country=None,
+    reverse_charge=False,
 ):
     return InvoiceInfo(
         invoice_date=date(2024, 1, 10),
@@ -52,6 +53,7 @@ def _invoice(
         detail_category=detail_category,
         afa=afa,
         country=country,
+        reverse_charge=reverse_charge,
         pdf_path=Path("invoice.pdf"),
     )
 
@@ -62,24 +64,14 @@ def _read_csv(path):
 
 
 class TestIsIg:
-    def test_nonzero_rate_is_never_ig(self):
-        inv = _invoice(country="Deutschland")
-        assert _is_ig(20, inv) is False
+    def test_no_invoice_is_not_ig(self):
+        assert _is_ig(None) is False
 
-    def test_zero_rate_no_invoice_is_not_ig(self):
-        assert _is_ig(0, None) is False
+    def test_reverse_charge_false_is_not_ig(self):
+        assert _is_ig(_invoice(reverse_charge=False)) is False
 
-    def test_zero_rate_no_country_is_not_ig(self):
-        assert _is_ig(0, _invoice(country=None)) is False
-
-    def test_zero_rate_austrian_supplier_is_not_ig(self):
-        assert _is_ig(0, _invoice(country="Österreich")) is False
-
-    def test_zero_rate_german_supplier_is_ig(self):
-        assert _is_ig(0, _invoice(country="Deutschland")) is True
-
-    def test_zero_rate_swiss_supplier_is_ig(self):
-        assert _is_ig(0, _invoice(country="Schweiz")) is True
+    def test_reverse_charge_true_is_ig(self):
+        assert _is_ig(_invoice(reverse_charge=True)) is True
 
 
 class TestVatDeadline:
@@ -130,22 +122,15 @@ class TestVatSplit:
         assert row[12] == "20%"
         assert row[18] == ""
 
-    def test_ig_when_vat_zero_foreign_supplier(self, tmp_path):
-        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, country="Deutschland"))
+    def test_ig_when_reverse_charge(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, reverse_charge=True))
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[12] == "0%"
         assert row[18] == "20"
 
-    def test_no_ig_when_vat_zero_austrian_supplier(self, tmp_path):
-        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, country="Österreich"))
-        generate_csv([result], tmp_path / "journal.csv")
-        row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[12] == "0%"
-        assert row[18] == ""
-
-    def test_no_ig_when_vat_zero_unknown_country(self, tmp_path):
-        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, country=None))
+    def test_no_ig_without_reverse_charge(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, reverse_charge=False))
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[12] == "0%"
@@ -170,19 +155,36 @@ class TestVatSplit:
         generate_csv([result], tmp_path / "journal.csv")
         assert _read_csv(tmp_path / "journal.csv")[0][2] == "Ausgaben"
 
-    def test_incoming_is_einnahmen(self, tmp_path):
-        result = MatchResult(payment=_payment("120.00", direction="incoming"), invoice=_invoice())
+    def test_incoming_outgoing_invoice_is_einnahmen(self, tmp_path):
+        result = MatchResult(
+            payment=_payment("120.00", direction="incoming"),
+            invoice=_invoice(invoice_type="outgoing_invoice"),
+        )
         generate_csv([result], tmp_path / "journal.csv")
         assert _read_csv(tmp_path / "journal.csv")[0][2] == "Einnahmen"
 
     def test_credit_note_is_einnahmen(self, tmp_path):
-        # Credit note received → incoming payment → Einnahmen, same as outgoing invoice
         result = MatchResult(
             payment=_payment("120.00", direction="incoming"),
             invoice=_invoice(invoice_type="credit_note"),
         )
         generate_csv([result], tmp_path / "journal.csv")
         assert _read_csv(tmp_path / "journal.csv")[0][2] == "Einnahmen"
+
+    def test_incoming_no_invoice_is_ausgaben(self, tmp_path):
+        # Refund: incoming payment with no matching invoice → Ausgaben
+        result = MatchResult(payment=_payment("43.54", direction="incoming"), invoice=None)
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][2] == "Ausgaben"
+
+    def test_incoming_incoming_invoice_is_ausgaben(self, tmp_path):
+        # Edge case: incoming payment matched to an incoming_invoice → treat as Ausgaben
+        result = MatchResult(
+            payment=_payment("120.00", direction="incoming"),
+            invoice=_invoice(invoice_type="incoming_invoice"),
+        )
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][2] == "Ausgaben"
 
     def test_receipt_number_formatted(self, tmp_path):
         result = MatchResult(payment=_payment("120.00", receipt_number=7), invoice=_invoice())
@@ -226,13 +228,45 @@ class TestDetailCategory:
         generate_csv([result], tmp_path / "journal.csv")
         assert _read_csv(tmp_path / "journal.csv")[0][3] == "sonstige Betriebsausgaben"
 
-    def test_incoming_always_leistungserloese(self, tmp_path):
+    def test_einnahmen_uses_default_einnahmen_category(self, tmp_path):
         result = MatchResult(
             payment=_payment("120.00", direction="incoming"),
-            invoice=_invoice(detail_category="Büromaterial"),
+            invoice=_invoice(invoice_type="outgoing_invoice"),
         )
         generate_csv([result], tmp_path / "journal.csv")
         assert _read_csv(tmp_path / "journal.csv")[0][3] == "Waren-/Leistungserlöse"
+
+    def test_einnahmen_category_configurable(self, tmp_path):
+        result = MatchResult(
+            payment=_payment("120.00", direction="incoming"),
+            invoice=_invoice(invoice_type="outgoing_invoice"),
+        )
+        generate_csv([result], tmp_path / "journal.csv", default_einnahmen_category="Übrige Erträge")
+        assert _read_csv(tmp_path / "journal.csv")[0][3] == "Übrige Erträge"
+
+    def test_refund_uses_default_ausgaben_category(self, tmp_path):
+        result = MatchResult(payment=_payment("43.54", direction="incoming"), invoice=None)
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][3] == "sonstige Betriebsausgaben"
+
+    def test_refund_amounts_are_negative(self, tmp_path):
+        result = MatchResult(payment=_payment("43.54", direction="incoming"), invoice=None)
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[9] == "-43,54"   # gross
+        assert row[13].startswith("-")  # VAT amount is negative
+        assert row[15].startswith("-")  # net amount is negative
+
+    def test_outgoing_ausgaben_amounts_are_positive(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00", direction="outgoing"), invoice=_invoice())
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[9] == "120,00"
+
+    def test_ausgaben_category_configurable(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00", direction="outgoing"), invoice=None)
+        generate_csv([result], tmp_path / "journal.csv", default_ausgaben_category="Porto/Gebühren")
+        assert _read_csv(tmp_path / "journal.csv")[0][3] == "Porto/Gebühren"
 
 
 class TestMixedVat:
@@ -306,7 +340,7 @@ class TestForexFee:
         # IG (VAT=0%): VAT amount is always written, zero for 0% rate
         result = MatchResult(
             payment=_payment("21.20", forex_fee="0.31"),
-            invoice=_invoice(vat_rate=0, country="Deutschland"),
+            invoice=_invoice(vat_rate=0, reverse_charge=True),
         )
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
@@ -445,7 +479,7 @@ class TestComputedFields:
 
     def test_ig_vat_anteilig_when_ig(self, tmp_path):
         # IG, gross=120.00, full business → 20% * 120.00 = 24.00
-        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, country="Deutschland"))
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, reverse_charge=True))
         generate_csv([result], tmp_path / "journal.csv")
         assert _read_csv(tmp_path / "journal.csv")[0][20] == "24,00"
 
@@ -456,7 +490,7 @@ class TestComputedFields:
 
     def test_ig_vat_rate_configurable(self, tmp_path):
         # ig_vat_rate=10, gross=120.00 → 10% * 120.00 = 12.00
-        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, country="Deutschland"))
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, reverse_charge=True))
         generate_csv([result], tmp_path / "journal.csv", ig_vat_rate=10)
         assert _read_csv(tmp_path / "journal.csv")[0][20] == "12,00"
 
