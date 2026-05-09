@@ -6,3 +6,5 @@ config.yaml
 CLAUDE.local.md
 *.log
 /_check_journal.py
+.coverage
+htmlcov/

@@ -5,11 +5,14 @@ from pathlib import Path
 import pytest
 
 from extractor import (
+    _apply_category_rules,
     _apply_position_business_rules,
     _classify_position_amounts,
     _format_address,
     _parse_amount,
     _parse_json,
+    _parse_positions,
+    apply_percentage_rules,
     validate_extracted_positions,
     validate_position_business_rules,
 )
@@ -275,6 +278,97 @@ class TestApplyPositionBusinessRules:
         rules = {"Supplier": {"business_keywords": ["Büro"]}}
         updated = _apply_position_business_rules("Supplier GmbH", positions, rules)
         assert all(not p.is_business for p in updated)
+
+
+class TestParseJson:
+    # fast-path and fence-stripping are already covered; these cover the remaining branches
+
+    def test_json_embedded_in_reasoning_text(self):
+        # LLM sometimes prepends explanation before the JSON object
+        text = 'Here is the extracted data:\n{"key": "value"}\nDone.'
+        assert _parse_json(text) == {"key": "value"}
+
+    def test_no_json_raises_value_error(self):
+        with pytest.raises(ValueError, match="non-JSON"):
+            _parse_json("Sorry, I cannot extract that information.")
+
+
+class TestApplyCategoryRules:
+    # Rule: keyword match wins over invoice-type default;
+    #       incoming_invoice defaults to Ausgaben, all other types default to Einnahmen.
+
+    def test_keyword_match_overrides_invoice_type_default(self):
+        rules = {"Telekom": "Telefon/Internet"}
+        assert _apply_category_rules("A1 Telekom Austria", "incoming_invoice", rules) == "Telefon/Internet"
+
+    def test_keyword_match_is_case_insensitive(self):
+        rules = {"telekom": "Telefon/Internet"}
+        assert _apply_category_rules("A1 TELEKOM AUSTRIA", "incoming_invoice", rules) == "Telefon/Internet"
+
+    def test_no_match_incoming_invoice_returns_ausgaben_default(self):
+        assert _apply_category_rules("Unknown GmbH", "incoming_invoice", {}) == "sonstige Betriebsausgaben"
+
+    def test_no_match_outgoing_invoice_returns_einnahmen_default(self):
+        assert _apply_category_rules("Customer AG", "outgoing_invoice", {}) == "Waren-/Leistungserlöse"
+
+    def test_no_match_credit_note_returns_einnahmen_default(self):
+        assert _apply_category_rules("Hays GmbH", "credit_note", {}) == "Waren-/Leistungserlöse"
+
+    def test_custom_defaults_respected(self):
+        result = _apply_category_rules(
+            "Unknown", "incoming_invoice", {},
+            default_ausgaben_category="Fremdpersonal",
+            default_einnahmen_category="Übrige Erträge",
+        )
+        assert result == "Fremdpersonal"
+
+
+class TestApplyPercentageRules:
+    # Rule: matched counterparty returns configured percentage; unmatched returns 100.
+
+    def test_match_returns_configured_percentage(self):
+        rules = {"kabelplus": 66.67}
+        assert apply_percentage_rules("kabelplus GmbH", rules) == 66.67
+
+    def test_match_is_case_insensitive(self):
+        rules = {"KABELPLUS": 66.67}
+        assert apply_percentage_rules("kabelplus GmbH", rules) == 66.67
+
+    def test_no_match_returns_100(self):
+        assert apply_percentage_rules("Unknown GmbH", {"kabelplus": 50.0}) == 100.0
+
+    def test_empty_rules_returns_100(self):
+        assert apply_percentage_rules("Any Company", {}) == 100.0
+
+
+class TestParsePositions:
+    # Rule: valid entries become InvoicePositions with raw amount in gross_amount and net/vat zeroed;
+    #       invalid entries are silently skipped.
+
+    def test_valid_positions_parsed(self):
+        raw = [
+            {"description": "Consulting", "amount": "1000.00", "vat_rate": 20},
+            {"description": "Expenses",   "amount": "200.00",  "vat_rate": 0},
+        ]
+        result = _parse_positions(raw)
+        assert len(result) == 2
+        assert result[0].gross_amount == Decimal("1000.00")
+        assert result[0].net_amount == Decimal("0")
+        assert result[0].vat_amount == Decimal("0")
+        assert result[1].vat_rate == 0
+
+    def test_invalid_entries_silently_skipped(self):
+        raw = [
+            {"description": "Good", "amount": "100.00", "vat_rate": 20},
+            {"description": "No amount", "vat_rate": 20},          # missing amount
+            {"description": "Bad amount", "amount": "n/a", "vat_rate": 20},  # unparseable
+        ]
+        result = _parse_positions(raw)
+        assert len(result) == 1
+        assert result[0].description == "Good"
+
+    def test_empty_list_returns_empty(self):
+        assert _parse_positions([]) == []
 
 
 class TestFormatAddress:
