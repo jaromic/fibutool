@@ -10,8 +10,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   * All other changes:
     * first create a plan and then come back to me.
       * Prefer minimal solutions that keep the system as consistent and reliable as possible.
+      * Check the relevant requirements in `requirements/` and flag any conflict or gap before planning.
     * After I give the GO, implement the change.
     * Update tests and documentation automatically if necessary.
+    * If the change affects behaviour described in `requirements/`, update the relevant requirements file.
     * Run unit tests with branch coverage automatically: `python -m pytest --cov=. --cov-branch --cov-report=term-missing -q`
     * Only when the current iteration has made a feature complete and all unit tests passed, execute a functional system test. To do that, execute the tool with as few test documents as possible, check output pdf and compare the csv output to the test_data/journal_testbase.csv
       * Fix all errors found in the test.
