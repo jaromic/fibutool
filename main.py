@@ -152,9 +152,64 @@ def _preflight(
             sys.exit(1)
 
 
-def load_config(config_path: Path) -> dict:
+# ── Argument parsing and configuration ───────────────────────────────────────
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="fibutool",
+        description="fibutool — bookkeeping PDF processor",
+    )
+    parser.add_argument(
+        "--version", "-V", action="version", version=f"%(prog)s {_VERSION}",
+    )
+    parser.add_argument(
+        "--last-receipt-number", "-n", type=int, default=None, metavar="N",
+        help="Last used receipt number (next receipt will be N+1); required unless --journal-only",
+    )
+    parser.add_argument(
+        "--workdir", "-w", type=Path, default=Path("."), metavar="DIR",
+        # Work directory: per-session data, logs, and intermediary files.
+        # Defaults to the current directory so you can cd into the session folder and run fibutool.
+        help="Work directory: per-session PDFs, output files, and logs (default: current directory)",
+    )
+    parser.add_argument(
+        "--config", "-c", type=Path, default=None, metavar="FILE",
+        # App directory: shared config, survives across sessions.
+        # Default is platform-specific; see _default_config_path().
+        help=f"Config file (default: {_default_config_path()})",
+    )
+    parser.add_argument(
+        "--clean", action="store_true",
+        help="Remove existing output files before running",
+    )
+    parser.add_argument(
+        "--journal-only", action="store_true",
+        help="Skip extraction, matching, and merging; regenerate journal.csv from the match cache written by a previous run",
+    )
+    parser.add_argument(
+        "--only-payment", metavar="FILE", type=Path, default=None,
+        help="Process only this payment PDF instead of all files in payments/",
+    )
+    parser.add_argument(
+        "--only-invoice", metavar="FILE", type=Path, default=None,
+        help="Process only this invoice PDF instead of all files in invoices/",
+    )
+    return parser.parse_args()
+
+
+def _load_config(config_path: Path) -> dict:
     with open(config_path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def _validate_config(config: dict) -> None:
+    try:
+        validate_category_rules(config.get("category_rules", {}))
+        validate_business_percentage_rules(config.get("business_percentage_rules", {}))
+        validate_position_business_rules(config.get("position_business_rules", {}))
+    except ValueError as e:
+        print(f"fibutool: config error — {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 # ── Pipeline helpers ─────────────────────────────────────────────────────────
@@ -336,126 +391,84 @@ def _resume_mode(
     return results, warnings
 
 
+def _do_merge_pdfs(results: list[MatchResult], merged_dir: Path, decimal_separator: str) -> None:
+    print(f"\nStep 3: Merging PDFs into {merged_dir}/...")
+    for result in results:
+        out = merge_pdfs(result, merged_dir, decimal_separator)
+        if result.invoice:
+            print(f"  {out.name}  ←  {result.invoice.pdf_path.name}")
+        else:
+            print(f"  {out.name}  ⚠  no invoice matched")
+
+
+def _print_summary(results: list[MatchResult], warnings: list[str]) -> None:
+    if warnings:
+        print("\nWarnings:")
+        for w in warnings:
+            print(f"  ⚠  {w}")
+    matched = sum(1 for r in results if r.invoice)
+    print(f"\nDone — {matched}/{len(results)} payments matched to invoices.")
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="fibutool",
-        description="fibutool — bookkeeping PDF processor",
-    )
-    parser.add_argument(
-        "--version", "-V", action="version", version=f"%(prog)s {_VERSION}",
-    )
-    parser.add_argument(
-        "--last-receipt-number", "-n", type=int, default=None, metavar="N",
-        help="Last used receipt number (next receipt will be N+1); required unless --journal-only",
-    )
-    parser.add_argument(
-        "--workdir", "-w", type=Path, default=Path("."), metavar="DIR",
-        # Work directory: per-session data, logs, and intermediary files.
-        # Defaults to the current directory so you can cd into the session folder and run fibutool.
-        help="Work directory: per-session PDFs, output files, and logs (default: current directory)",
-    )
-    parser.add_argument(
-        "--config", "-c", type=Path, default=None, metavar="FILE",
-        # App directory: shared config, survives across sessions.
-        # Default is platform-specific; see _default_config_path().
-        help=f"Config file (default: {_default_config_path()})",
-    )
-    parser.add_argument(
-        "--clean", action="store_true",
-        help="Remove existing output files before running",
-    )
-    parser.add_argument(
-        "--journal-only", action="store_true",
-        help="Skip extraction, matching, and merging; regenerate journal.csv from the match cache written by a previous run",
-    )
-    parser.add_argument(
-        "--only-payment", metavar="FILE", type=Path, default=None,
-        help="Process only this payment PDF instead of all files in payments/",
-    )
-    parser.add_argument(
-        "--only-invoice", metavar="FILE", type=Path, default=None,
-        help="Process only this invoice PDF instead of all files in invoices/",
-    )
-    args = parser.parse_args()
-
+    args = _parse_args()
     workdir = args.workdir
     match_cache_path = workdir / "match_results.json"
     is_resume = match_cache_path.exists() and not args.clean and not args.journal_only
 
     if not args.journal_only and not is_resume and args.last_receipt_number is None:
-        parser.error("--last-receipt-number / -n is required unless --journal-only is set or resuming from cache")
+        print("fibutool: error — --last-receipt-number / -n is required unless --journal-only is set or resuming from cache", file=sys.stderr)
+        sys.exit(2)
 
     _setup_logging(workdir)
 
     config_path = args.config if args.config is not None else _default_config_path()
     print(f"fibutool {_VERSION}  |  config: {config_path}  |  workdir: {workdir.resolve()}")
 
-    payments_dir = workdir / "payments"
-    invoices_dir = workdir / "invoices"
+    payments_dir      = workdir / "payments"
+    invoices_dir      = workdir / "invoices"
     payments_ordered_dir = workdir / "payments-ordered"
-    merged_dir = workdir / "merged"
-    csv_path = workdir / "journal.csv"
+    merged_dir        = workdir / "merged"
+    csv_path          = workdir / "journal.csv"
 
     _preflight(merged_dir, payments_ordered_dir, csv_path, args.clean,
                journal_only=args.journal_only, resume=is_resume, match_cache_path=match_cache_path)
 
-    config = load_config(config_path)
-    mixed_vat_label: str = config.get("mixed_vat_label", "gemischt")
-    decimal_separator: str = config.get("decimal_separator", ",")
-    ig_vat_rate: int = config.get("ig_vat_rate", 20)
-    default_einnahmen_category: str = config.get("default_einnahmen_category", "Waren-/Leistungserlöse")
-    default_ausgaben_category: str = config.get("default_ausgaben_category", "sonstige Betriebsausgaben")
-
-    invoice_extraction_warnings: list[str] = []
+    config = _load_config(config_path)
+    mixed_vat_label: str       = config.get("mixed_vat_label", "gemischt")
+    decimal_separator: str     = config.get("decimal_separator", ",")
+    ig_vat_rate: int           = config.get("ig_vat_rate", 20)
+    default_einnahmen_category = config.get("default_einnahmen_category", "Waren-/Leistungserlöse")
+    default_ausgaben_category  = config.get("default_ausgaben_category", "sonstige Betriebsausgaben")
 
     if args.journal_only:
         print(f"Loading match cache from {match_cache_path}...")
         results = load_results(match_cache_path)
         print(f"  {len(results)} match result(s) loaded.")
+        warnings: list[str] = []
     else:
-        try:
-            validate_category_rules(config.get("category_rules", {}))
-            validate_business_percentage_rules(config.get("business_percentage_rules", {}))
-            validate_position_business_rules(config.get("position_business_rules", {}))
-        except ValueError as e:
-            print(f"fibutool: config error — {e}", file=sys.stderr)
-            sys.exit(1)
+        _validate_config(config)
+        # Anthropic API client — shared across all extraction and matching calls
         client = anthropic.Anthropic(api_key=config.get("anthropic_api_key") or None)
 
         if is_resume:
-            results, invoice_extraction_warnings = _resume_mode(
-                invoices_dir, match_cache_path, client, config
-            )
+            results, warnings = _resume_mode(invoices_dir, match_cache_path, client, config)
         else:
-            results, invoice_extraction_warnings = _full_mode(
+            results, warnings = _full_mode(
                 args, payments_dir, invoices_dir, payments_ordered_dir, match_cache_path, client, config
             )
 
-        # Step 3: Merge PDFs
-        print(f"\nStep 3: Merging PDFs into {merged_dir}/...")
-        for result in results:
-            out = merge_pdfs(result, merged_dir, decimal_separator)
-            if result.invoice:
-                print(f"  {out.name}  ←  {result.invoice.pdf_path.name}")
-            else:
-                print(f"  {out.name}  ⚠  no invoice matched")
+        _do_merge_pdfs(results, merged_dir, decimal_separator)
 
     # Step 4: CSV journal
     generate_csv(results, csv_path, mixed_vat_label, decimal_separator, ig_vat_rate,
                  default_einnahmen_category, default_ausgaben_category)
     print(f"\nStep 4: Journal written → {csv_path}")
 
-    # Summary
-    warnings = invoice_extraction_warnings + [w for r in results for w in r.warnings]
-    if warnings:
-        print("\nWarnings:")
-        for w in warnings:
-            print(f"  ⚠  {w}")
-
-    matched = sum(1 for r in results if r.invoice)
-    print(f"\nDone — {matched}/{len(results)} payments matched to invoices.")
+    warnings += [w for r in results for w in r.warnings]
+    _print_summary(results, warnings)
 
 
 if __name__ == "__main__":
