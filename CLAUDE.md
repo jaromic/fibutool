@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 * When I ask a question, answer the question.
 * When I instruct you to change something:
-  * Do not begin before running the respective steps ("before instructions") in @CLAUDE.local.md
+  * STOP. Before anything else — including forming a plan — run ALL before instructions from CLAUDE.local.md. This is not a checkbox. It requires genuine critical thinking on every dimension listed there. Only proceed to (A) or (B) after completing this.
   * (A) For minor change of a few lines, just change it and run unit tests.
   * (B) All other changes:
     * first create a plan and then come back to me.
