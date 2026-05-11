@@ -3,7 +3,7 @@
 Two-directory model
 -------------------
 App directory  — shared across all sessions; holds config and the installed executable.
-               Windows default: %APPDATA%\\fibutool\\
+               Default: same directory as this script (main.py)
                Override with:   --config <path>
 
 Work directory — per-session; holds input PDFs, output files, log, and intermediary data.
@@ -12,7 +12,6 @@ Work directory — per-session; holds input PDFs, output files, log, and interme
 """
 
 import argparse
-import os
 import shutil
 import sys
 from datetime import datetime
@@ -47,16 +46,8 @@ except Exception:
 # ── Directory helpers ────────────────────────────────────────────────────────
 
 def _default_config_path() -> Path:
-    """Return the platform-specific app-directory config path.
-
-    App directory: shared across sessions; survives session folder changes.
-      Windows : %APPDATA%\\fibutool\\config.yaml
-      Other   : ~/.config/fibutool/config.yaml
-    """
-    appdata = os.environ.get("APPDATA")
-    if appdata:
-        return Path(appdata) / "fibutool" / "config.yaml"
-    return Path.home() / ".config" / "fibutool" / "config.yaml"
+    """Return the default config path: config.yaml in the same directory as this script."""
+    return Path(__file__).parent / "config.yaml"
 
 
 # ── Logging ──────────────────────────────────────────────────────────────────
