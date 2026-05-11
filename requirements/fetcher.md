@@ -25,7 +25,7 @@ fetcher uses the same work directory as fibutool.
   <timestamp>_fetcher.log  output — full transcript for this run
 ```
 
-Configuration lives in the shared app-directory config file (`config.yaml`) alongside fibutool settings.
+Configuration lives in the shared app-directory config file (`config.yaml`) in the same directory as `fetcher.py`.
 
 ---
 
@@ -38,7 +38,8 @@ fetcher:
   gmail_sources:
     - label: "office"           # human-readable name for logs
       username: office@example.com
-      oauth2_credentials: "~/.config/fibutool/office_credentials.json"  # Google OAuth2 token file
+      client_secret_file: "~/.config/fibutool/client_secret_office.json"  # downloaded from Google Cloud Console
+      token_file: "~/.config/fibutool/token_office.json"                  # created by fetcher on first run
       folders:                  # Gmail labels/folders to search (default: INBOX)
         - INBOX
       filters:                  # all filters are AND-combined; omit a list to match any value
@@ -56,7 +57,7 @@ fetcher:
 fetcher uses the Gmail API with OAuth 2.0 and the `readonly` scope (`https://www.googleapis.com/auth/gmail.readonly`).
 
 - **F0.1** A Google Cloud project with the Gmail API enabled and an OAuth 2.0 client ID (desktop app type) must be created once per Google Workspace account by the user.
-- **F0.2** On first run for a source, fetcher opens a browser for the OAuth consent flow and saves the resulting token to the configured `oauth2_credentials` file.
+- **F0.2** On first run for a source, fetcher opens a browser for the OAuth consent flow and saves the resulting token to the configured `token_file` file.
 - **F0.3** On subsequent runs, fetcher loads the token from the credentials file and refreshes it automatically if expired.
 - **F0.4** The credentials file must not be committed to version control (add to `.gitignore`).
 

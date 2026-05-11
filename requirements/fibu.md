@@ -32,17 +32,15 @@ fibutool separates two concerns: the installed application (shared, persistent) 
 
 ### Application directory
 
-Shared across all sessions. Contains the installed executable and the configuration file. Survives session folder changes and is not touched during a run.
+Shared across all sessions. Contains the installed executables and the configuration file. Survives session folder changes and is not touched during a run.
 
-| Platform | Default path |
-|---|---|
-| Windows | `%APPDATA%\fibutool\` |
-| Linux / macOS | `~/.config/fibutool/` |
-
+Default: the directory containing `main.py` and `fetcher.py`.  
 Override with `--config <path>`.
 
 Contents:
 ```
+main.py        fibutool entry point
+fetcher.py     fetcher entry point
 config.yaml    shared configuration (API key, rules, defaults)
 ```
 
