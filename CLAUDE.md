@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 * When I ask a question, answer the question.
 * When I instruct you to change something:
+  * Always critique or challenge my ideas.
   * For minor change of a few lines, just change it and run unit tests.
   * All other changes:
     * first create a plan and then come back to me.
