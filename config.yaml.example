@@ -28,3 +28,21 @@ business_percentage_rules:
 position_business_rules:
   "Municipality Name":
     business_keywords: ["Office", "Business"]
+
+fetcher:
+  since: "2026-01-01"          # skip messages received before this date (overridable via --since)
+
+  gmail_sources:
+    - label: "office"           # human-readable name used in logs and --only filter
+      username: office@example.com
+      client_secret_file: "~/.config/fibutool/client_secret_office.json"  # downloaded from Google Cloud Console
+      token_file: "~/.config/fibutool/token_office.json"                  # created by fetcher on first run
+      folders:
+        - INBOX
+      filters:                  # AND-combined; omit a list to accept any value
+        senders:                # substring match on From: header
+          - "@supplier.com"
+        subject_keywords:       # substring match on Subject: header (case-insensitive)
+          - "Rechnung"
+          - "Invoice"
+          - "Gutschrift"

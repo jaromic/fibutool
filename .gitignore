@@ -1,10 +1,22 @@
+# IDE and development files
 .idea
-test_data*
-config.yaml
 /BACKLOG
-/.claude/settings.local.json
-CLAUDE.local.md
-*.log
 /_check_journal.py
+
+# Test data
+test_data*
+
+# Test coverage
 .coverage
 htmlcov/
+
+# Local configuration
+config.yaml
+/.claude/settings.local.json
+CLAUDE.local.md
+
+# Logfiles
+*.log
+
+# Secrets
+/client_secret_*.json
