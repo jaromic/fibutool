@@ -86,8 +86,8 @@ def _parse_args() -> argparse.Namespace:
         description="fetcher — Gmail invoice downloader for fibutool",
     )
     parser.add_argument(
-        "--since", metavar="YYYY-MM-DD", default=None,
-        help="Download attachments from messages received on or after this date (overrides config)",
+        "--since", metavar="YYYY-MM-DD", required=True,
+        help="Download attachments from messages received on or after this date (YYYY-MM-DD)",
     )
     parser.add_argument(
         "--workdir", "-w", type=Path, default=Path("."), metavar="DIR",
@@ -291,6 +291,7 @@ def _process_gmail_source(
             subject_header = headers.get("Subject", "")
 
             if not _matches_filters(from_header, subject_header, senders, subject_keywords):
+                print(f"  skipped (subject filter): \"{subject_header}\"  (from: {from_header})")
                 continue
 
             try:
@@ -303,6 +304,10 @@ def _process_gmail_source(
 
             pdf_parts = _find_pdf_parts(full_msg.get("payload", {}))
 
+            if not pdf_parts:
+                print(f"  skipped (no PDF attachments): \"{subject_header}\"  (from: {from_header})")
+                continue
+
             for part in pdf_parts:
                 filename = part.get("filename") or "attachment.pdf"
                 attachment_id = part.get("body", {}).get("attachmentId")
@@ -310,6 +315,7 @@ def _process_gmail_source(
 
                 canonical_key = f"{label}/{msg_id}/{filename}"
                 if seen.contains(canonical_key):
+                    print(f"  skipped (already downloaded): {filename}  (from: {from_header})")
                     continue
 
                 if dry_run:
@@ -372,14 +378,10 @@ def main() -> None:
     config = _load_config(config_path)
     fetcher_cfg = pl_load_fetcher_config(config)
 
-    since_str = args.since or fetcher_cfg.get("since")
-    if not since_str:
-        print("fetcher: error — 'since' date is required (set in config or via --since)", file=sys.stderr)
-        sys.exit(1)
     try:
-        since = date.fromisoformat(since_str)
+        since = date.fromisoformat(args.since)
     except ValueError:
-        print(f"fetcher: error — invalid since date '{since_str}' (expected YYYY-MM-DD)", file=sys.stderr)
+        print(f"fetcher: error — invalid date '{args.since}' — expected YYYY-MM-DD", file=sys.stderr)
         sys.exit(1)
 
     invoices_dir = workdir / "invoices"

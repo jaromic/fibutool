@@ -20,3 +20,4 @@ CLAUDE.local.md
 
 # Secrets
 /client_secret_*.json
+/fetcher*.json

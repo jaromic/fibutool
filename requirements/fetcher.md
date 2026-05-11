@@ -10,7 +10,7 @@ fetcher downloads invoice documents from Google Workspace email accounts and dep
 |---|---|
 | Source | A configured Google Workspace account to search for invoice PDFs |
 | Seen registry | A persistent record of already-downloaded files, used for de-duplication |
-| Since date | The earliest Gmail message received date to include; older messages are skipped |
+| Since date | The earliest Gmail message received date to include; passed as `--since` on the CLI |
 
 ---
 
@@ -33,8 +33,6 @@ Configuration lives in the shared app-directory config file (`config.yaml`) in t
 
 ```yaml
 fetcher:
-  since: "2026-01-01"          # skip messages received before this date (Gmail received date, ISO, overridable via CLI)
-
   gmail_sources:
     - label: "office"           # human-readable name for logs
       username: office@example.com
@@ -87,7 +85,7 @@ One pass per configured Gmail source.
 | **Dry run** | `--dry-run` | List what would be downloaded; do not write files or update registry |
 
 **Flags:**
-- `--since YYYY-MM-DD`: override the `since` date from config.
+- `--since YYYY-MM-DD` *(required)*: skip messages received before this date.
 - `--workdir <path>`: work directory (default: current directory).
 - `--config <path>`: config file override.
 - `--only <label>`: process only the named source.

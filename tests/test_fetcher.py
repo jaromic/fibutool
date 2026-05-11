@@ -185,12 +185,12 @@ class TestLoadFetcherConfig:
 
     def test_missing_gmail_sources_exits(self):
         with pytest.raises(SystemExit):
-            pl_load_fetcher_config({"fetcher": {"since": "2026-01-01"}})
+            pl_load_fetcher_config({"fetcher": {}})
 
     def test_valid_config_returns_fetcher_section(self):
-        config = {"fetcher": {"since": "2026-01-01", "gmail_sources": [{"label": "office"}]}}
+        config = {"fetcher": {"gmail_sources": [{"label": "office"}]}}
         result = pl_load_fetcher_config(config)
-        assert result["since"] == "2026-01-01"
+        assert result["gmail_sources"][0]["label"] == "office"
 
 
 # ── _process_gmail_source ─────────────────────────────────────────────────────

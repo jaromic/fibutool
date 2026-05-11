@@ -30,8 +30,6 @@ position_business_rules:
     business_keywords: ["Office", "Business"]
 
 fetcher:
-  since: "2026-01-01"          # skip messages received before this date (overridable via --since)
-
   gmail_sources:
     - label: "office"           # human-readable name used in logs and --only filter
       username: office@example.com

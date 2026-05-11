@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 * When I ask a question, answer the question.
 * When I instruct you to change something:
-  * Always critique or challenge my ideas.
-  * For minor change of a few lines, just change it and run unit tests.
-  * All other changes:
+  * Do not begin before running the respective steps ("before instructions") in @CLAUDE.local.md
+  * (A) For minor change of a few lines, just change it and run unit tests.
+  * (B) All other changes:
     * first create a plan and then come back to me.
       * Prefer minimal solutions that keep the system as consistent and reliable as possible.
       * Check the relevant requirements in `requirements/` and flag any conflict or gap before planning.
@@ -20,6 +20,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
       * Fix all errors found in the test.
     * Evaluate our current development process and suggest improvements for the next round.
     * Make the one refactoring suggestion that has most impact with the most minimal change. What would make the system more maintainable and understandable for new developers?
+    * After every completed task, do not start the next before completing this:
+    ** Run the respective steps ("after instructions") in @CLAUDE.local.md
 
 ## Development Environment
 
