@@ -12,9 +12,13 @@ Subsequent runs load and auto-refresh the token automatically.
 
 import argparse
 import base64
+import fnmatch
+import hashlib
 import json
+import os.path
+import shutil
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 
 import yaml
@@ -115,11 +119,8 @@ def _load_config(config_path: Path) -> dict:
 
 def pl_load_fetcher_config(config: dict) -> dict:
     fetcher_cfg = config.get("fetcher")
-    if not fetcher_cfg:
+    if fetcher_cfg is None:
         print("fetcher: config error — no 'fetcher' section found in config.yaml", file=sys.stderr)
-        sys.exit(1)
-    if not fetcher_cfg.get("gmail_sources"):
-        print("fetcher: config error — 'fetcher.gmail_sources' is empty or missing", file=sys.stderr)
         sys.exit(1)
     return fetcher_cfg
 
@@ -225,6 +226,12 @@ def _safe_filename(invoices_dir: Path, name: str) -> Path:
         if not candidate.exists():
             return candidate
         counter += 1
+
+
+# ── Filesystem helpers ────────────────────────────────────────────────────────
+
+def _sha256_of_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 # ── Source processing ─────────────────────────────────────────────────────────
@@ -351,6 +358,65 @@ def _process_gmail_source(
     return saved_files, warnings
 
 
+def _process_filesystem_source(
+    source: dict,
+    since: date,
+    invoices_dir: Path,
+    seen: SeenRegistry,
+    dry_run: bool,
+) -> tuple[list[str], list[str]]:
+    label = source.get("label", "?")
+    src_path = Path(source["path"]).expanduser()
+    recursive: bool = source.get("recursive", False)
+    patterns: list[str] = source.get("filename_patterns", ["*.pdf"])
+    filter_mtime: bool = source.get("filter_by_mtime", True)
+
+    print(f"\nSource [{label}] (filesystem: {src_path})")
+
+    if not src_path.exists():
+        return [], [f"[fetcher/{label}] path does not exist: {src_path}"]
+
+    candidates = list(src_path.rglob("*") if recursive else src_path.iterdir())
+    matching = [
+        f for f in candidates
+        if f.is_file() and any(fnmatch.fnmatch(f.name, p) for p in patterns)
+    ]
+
+    if filter_mtime:
+        since_ts = datetime.combine(since, time()).timestamp()
+        matching = [f for f in matching if f.stat().st_mtime >= since_ts]
+
+    print(f"  {len(matching)} file(s) matched")
+
+    saved_files: list[str] = []
+    warnings: list[str] = []
+
+    for src_file in sorted(matching):
+        try:
+            sha256 = _sha256_of_file(src_file)
+        except OSError as e:
+            warnings.append(f"[fetcher/{label}] could not read {src_file.name}: {e}")
+            continue
+
+        canonical_key = f"local_fs/{sha256}"
+        if seen.contains(canonical_key):
+            print(f"  skipped (already downloaded): {src_file.name}")
+            continue
+
+        if dry_run:
+            print(f"  [dry-run] would save: {src_file.name}")
+            saved_files.append(src_file.name)
+            continue
+
+        out_path = _safe_filename(invoices_dir, src_file.name)
+        shutil.copy2(src_file, out_path)
+        seen.add(canonical_key)
+        saved_files.append(out_path.name)
+        print(f"  saved: {out_path.name}")
+
+    return saved_files, warnings
+
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 def _print_summary(saved: list[str], warnings: list[str], dry_run: bool) -> None:
@@ -385,22 +451,35 @@ def main() -> None:
         sys.exit(1)
 
     invoices_dir = workdir / "invoices"
-    invoices_dir.mkdir(parents=True, exist_ok=True)
+    if not os.path.exists(invoices_dir):
+        print(f"  Directory {invoices_dir}/ does not exist — please create it.")
+        sys.exit(1)
 
     seen = SeenRegistry(workdir / "fetcher_seen.json")
 
-    sources: list[dict] = fetcher_cfg.get("gmail_sources", [])
+    all_sources: list[tuple[str, dict]] = (
+        [("gmail", s) for s in fetcher_cfg.get("gmail_sources", [])] +
+        [("filesystem", s) for s in fetcher_cfg.get("filesystem_sources", [])]
+    )
+
     if args.only:
-        sources = [s for s in sources if s.get("label") == args.only]
-        if not sources:
+        all_sources = [(t, s) for t, s in all_sources if s.get("label") == args.only]
+        if not all_sources:
             print(f"fetcher: error — no source with label '{args.only}' found in config", file=sys.stderr)
             sys.exit(1)
+
+    if not all_sources:
+        print("fetcher: config error — no sources configured (add gmail_sources or filesystem_sources)", file=sys.stderr)
+        sys.exit(1)
 
     all_saved: list[str] = []
     all_warnings: list[str] = []
 
-    for source in sources:
-        saved, warnings = _process_gmail_source(source, since, invoices_dir, seen, args.dry_run)
+    for source_type, source in all_sources:
+        if source_type == "gmail":
+            saved, warnings = _process_gmail_source(source, since, invoices_dir, seen, args.dry_run)
+        else:
+            saved, warnings = _process_filesystem_source(source, since, invoices_dir, seen, args.dry_run)
         all_saved.extend(saved)
         all_warnings.extend(warnings)
 

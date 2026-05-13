@@ -1,5 +1,6 @@
 import base64
 import json
+import time
 from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -10,8 +11,10 @@ from fetcher import (
     SeenRegistry,
     _find_pdf_parts,
     _matches_filters,
+    _process_filesystem_source,
     _process_gmail_source,
     _safe_filename,
+    _sha256_of_file,
     pl_load_fetcher_config,
 )
 
@@ -179,18 +182,19 @@ class TestLoadFetcherConfig:
         with pytest.raises(SystemExit):
             pl_load_fetcher_config({})
 
-    def test_empty_gmail_sources_exits(self):
-        with pytest.raises(SystemExit):
-            pl_load_fetcher_config({"fetcher": {"gmail_sources": []}})
-
-    def test_missing_gmail_sources_exits(self):
-        with pytest.raises(SystemExit):
-            pl_load_fetcher_config({"fetcher": {}})
-
-    def test_valid_config_returns_fetcher_section(self):
+    def test_valid_gmail_config_returns_fetcher_section(self):
         config = {"fetcher": {"gmail_sources": [{"label": "office"}]}}
         result = pl_load_fetcher_config(config)
         assert result["gmail_sources"][0]["label"] == "office"
+
+    def test_valid_filesystem_only_config_returns_fetcher_section(self):
+        config = {"fetcher": {"filesystem_sources": [{"label": "outgoing", "path": "/tmp"}]}}
+        result = pl_load_fetcher_config(config)
+        assert result["filesystem_sources"][0]["label"] == "outgoing"
+
+    def test_empty_fetcher_section_returns_dict(self):
+        result = pl_load_fetcher_config({"fetcher": {}})
+        assert result == {}
 
 
 # ── _process_gmail_source ─────────────────────────────────────────────────────
@@ -397,3 +401,255 @@ class TestProcessGmailSource:
 
         assert saved == []
         assert any("failed to search" in w for w in warnings)
+
+
+# ── _sha256_of_file ───────────────────────────────────────────────────────────
+
+class TestSha256OfFile:
+    def test_known_content(self, tmp_path):
+        import hashlib
+        f = tmp_path / "test.pdf"
+        f.write_bytes(PDF_BYTES)
+        assert _sha256_of_file(f) == hashlib.sha256(PDF_BYTES).hexdigest()
+
+    def test_different_content_different_hash(self, tmp_path):
+        a = tmp_path / "a.pdf"
+        b = tmp_path / "b.pdf"
+        a.write_bytes(b"content A")
+        b.write_bytes(b"content B")
+        assert _sha256_of_file(a) != _sha256_of_file(b)
+
+
+# ── _process_filesystem_source ────────────────────────────────────────────────
+
+def _make_fs_source(src_path: Path, label: str = "outgoing", **overrides) -> dict:
+    base = {"label": label, "path": str(src_path)}
+    base.update(overrides)
+    return base
+
+
+def _write_pdf(path: Path, content: bytes = PDF_BYTES) -> Path:
+    path.write_bytes(content)
+    return path
+
+
+class TestProcessFilesystemSource:
+    def test_copies_matching_pdf(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_pdf(src / "invoice.pdf")
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, warnings = _process_filesystem_source(
+            _make_fs_source(src, filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert saved == ["invoice.pdf"]
+        assert (invoices_dir / "invoice.pdf").read_bytes() == PDF_BYTES
+        assert warnings == []
+
+    def test_canonical_key_is_content_hash(self, tmp_path):
+        import hashlib
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_pdf(src / "invoice.pdf")
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        _process_filesystem_source(
+            _make_fs_source(src, filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        expected_key = f"local_fs/{hashlib.sha256(PDF_BYTES).hexdigest()}"
+        assert seen.contains(expected_key)
+
+    def test_skips_already_seen_by_content_hash(self, tmp_path):
+        import hashlib
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_pdf(src / "invoice.pdf")
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+        seen.add(f"local_fs/{hashlib.sha256(PDF_BYTES).hexdigest()}")
+
+        saved, warnings = _process_filesystem_source(
+            _make_fs_source(src, filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert saved == []
+        assert not (invoices_dir / "invoice.pdf").exists()
+
+    def test_deduplicates_identical_content_across_names(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_pdf(src / "invoice_a.pdf", b"same content")
+        _write_pdf(src / "invoice_b.pdf", b"same content")
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, warnings = _process_filesystem_source(
+            _make_fs_source(src, filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert len(saved) == 1
+
+    def test_dry_run_does_not_write_or_register(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_pdf(src / "invoice.pdf")
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, _ = _process_filesystem_source(
+            _make_fs_source(src, filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=True,
+        )
+
+        assert "invoice.pdf" in saved
+        assert not (invoices_dir / "invoice.pdf").exists()
+        assert len(seen._keys) == 0
+
+    def test_nonexistent_path_returns_warning(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, warnings = _process_filesystem_source(
+            _make_fs_source(tmp_path / "does_not_exist", filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert saved == []
+        assert any("does not exist" in w for w in warnings)
+
+    def test_filename_collision_appends_counter(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_pdf(src / "invoice.pdf")
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        (invoices_dir / "invoice.pdf").write_bytes(b"existing")
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, _ = _process_filesystem_source(
+            _make_fs_source(src, filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert saved == ["invoice_2.pdf"]
+        assert (invoices_dir / "invoice_2.pdf").read_bytes() == PDF_BYTES
+
+    def test_filters_by_filename_pattern(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_pdf(src / "invoice.pdf")
+        (src / "notes.txt").write_bytes(b"text")
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, _ = _process_filesystem_source(
+            _make_fs_source(src, filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert saved == ["invoice.pdf"]
+
+    def test_recursive_walks_subdirectories(self, tmp_path):
+        src = tmp_path / "src"
+        sub = src / "2026"
+        sub.mkdir(parents=True)
+        _write_pdf(sub / "deep_invoice.pdf")
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, _ = _process_filesystem_source(
+            _make_fs_source(src, recursive=True, filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert saved == ["deep_invoice.pdf"]
+
+    def test_non_recursive_ignores_subdirectories(self, tmp_path):
+        src = tmp_path / "src"
+        sub = src / "2026"
+        sub.mkdir(parents=True)
+        _write_pdf(sub / "deep_invoice.pdf")
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, _ = _process_filesystem_source(
+            _make_fs_source(src, filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert saved == []
+
+    def test_filter_by_mtime_excludes_old_files(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        old_file = src / "old_invoice.pdf"
+        _write_pdf(old_file)
+        # set mtime to well before since date
+        past_ts = date(2025, 1, 1).timetuple()
+        import calendar
+        past_epoch = calendar.timegm(past_ts)
+        import os
+        os.utime(old_file, (past_epoch, past_epoch))
+
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, _ = _process_filesystem_source(
+            _make_fs_source(src),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert saved == []
+
+    def test_filter_by_mtime_includes_recent_files(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        new_file = src / "new_invoice.pdf"
+        _write_pdf(new_file)
+        # mtime defaults to now, which is after any reasonable since date
+
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, _ = _process_filesystem_source(
+            _make_fs_source(src),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert saved == ["new_invoice.pdf"]
+
+    def test_custom_filename_patterns(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        _write_pdf(src / "Rechnung_001.pdf")
+        _write_pdf(src / "other.pdf", b"other content")
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        saved, _ = _process_filesystem_source(
+            _make_fs_source(src, filename_patterns=["Rechnung_*.pdf"], filter_by_mtime=False),
+            date(2026, 1, 1), invoices_dir, seen, dry_run=False,
+        )
+
+        assert saved == ["Rechnung_001.pdf"]

@@ -44,3 +44,11 @@ fetcher:
           - "Rechnung"
           - "Invoice"
           - "Gutschrift"
+
+  filesystem_sources:
+    - label: "outgoing"         # own outgoing invoices exported to a local folder
+      path: "~/Documents/invoices/outgoing"
+      recursive: false          # set true to walk subdirectories
+      filename_patterns:        # glob patterns (default: ["*.pdf"])
+        - "*.pdf"
+      filter_by_mtime: true     # skip files older than --since (default: true)
