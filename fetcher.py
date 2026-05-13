@@ -51,7 +51,7 @@ class SeenRegistry:
         )
 
 
-# ── Shared utilities (mirrors main.py) ───────────────────────────────────────
+# ── Shared utilities (mirrors process.py) ────────────────────────────────────
 
 def _default_config_path() -> Path:
     """Return the default config path: config.yaml in the same directory as this script."""

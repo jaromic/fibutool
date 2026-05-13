@@ -3,7 +3,7 @@
 Two-directory model
 -------------------
 App directory  — shared across all sessions; holds config and the installed executable.
-               Default: same directory as this script (main.py)
+               Default: same directory as this script (process.py)
                Override with:   --config <path>
 
 Work directory — per-session; holds input PDFs, output files, log, and intermediary data.

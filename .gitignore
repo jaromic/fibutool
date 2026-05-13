@@ -1,3 +1,8 @@
+# Python packaging artifacts
+*.egg-info/
+__pycache__/
+*.pyc
+
 # IDE and development files
 .idea
 /BACKLOG

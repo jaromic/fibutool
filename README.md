@@ -18,7 +18,7 @@ Reads the last receipt number and latest payment date from the original journal 
 
 The normal entry point for a bookkeeping session. Uses the journal reader to obtain session parameters, guides the user through the one manual step (downloading bank payment receipts), then runs fetcher and fibutool in sequence. Offers abort / retry / continue at every stage.
 
-### Processing layer — `fibutool` (`main.py`)
+### Processing layer — `fibutool-process` (`process.py`)
 
 Core bookkeeping pipeline using Claude as AI backbone.
 
@@ -117,39 +117,39 @@ Create a session directory, then run the orchestrator. It reads the journal, pro
 cd C:\fibu\2026-Q2
 mkdir payments payments-ordered invoices merged
 
-python run.py --workdir .
+fibutool --workdir .
 ```
 
 ### Fetcher — standalone
 
 ```bat
 :: Download invoices from all configured sources since a date:
-python fetcher.py --since 2026-03-01
+fetcher --since 2026-03-01
 
 :: Dry run — show what would be downloaded without writing anything:
-python fetcher.py --since 2026-03-01 --dry-run
+fetcher --since 2026-03-01 --dry-run
 
 :: Only one source:
-python fetcher.py --since 2026-03-01 --only office
+fetcher --since 2026-03-01 --only office
 ```
 
 ### Processing layer — standalone
 
 ```bat
 :: Normal run — last receipt was 108, next will be 109:
-fibutool -n 108
+fibutool-process -n 108
 
 :: Remove output from a previous run before re-running:
-fibutool -n 108 --clean
+fibutool-process -n 108 --clean
 
 :: Resume after adding missing invoices (no -n required):
-fibutool
+fibutool-process
 
 :: Regenerate journal.csv only (no API calls):
-fibutool --journal-only
+fibutool-process --journal-only
 
 :: Test with a single payment + invoice (3 API calls total):
-fibutool -n 108 --clean --only-payment payments\receipt.pdf --only-invoice invoices\invoice.pdf
+fibutool-process -n 108 --clean --only-payment payments\receipt.pdf --only-invoice invoices\invoice.pdf
 ```
 
 Every tool writes a timestamped log file to the work directory.

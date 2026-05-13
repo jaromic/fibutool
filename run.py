@@ -107,7 +107,7 @@ def main() -> None:
     here = Path(__file__).parent
     fetcher_cmd_base = [sys.executable, str(here / "fetcher.py"),
                         "--workdir", str(workdir), "--config", str(config_path)]
-    fibutool_cmd_base = [sys.executable, str(here / "main.py"),
+    fibutool_cmd_base = [sys.executable, str(here / "process.py"),
                          "--workdir", str(workdir), "--config", str(config_path)]
 
     # ── Stage 1: read journal ─────────────────────────────────────────────────
