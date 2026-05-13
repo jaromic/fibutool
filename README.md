@@ -1,10 +1,26 @@
 # fibutool
 
-fibutool is a CLI tool that automates bookkeeping preparation: it renames, matches, and merges bank payment receipt PDFs with invoice PDFs, then produces a semicolon-delimited CSV journal ready for import into Excel.
+fibutool is a CLI toolset that automates bookkeeping preparation for Austrian Einnahmen-Ausgaben-Rechnung: it fetches invoice PDFs from email and filesystem sources, matches them against bank payment receipts, merges them into archive PDFs, and produces a semicolon-delimited CSV journal ready for import into Excel.
 
 ## Architecture
 
-fibutool is a CLI bookkeeping tool that processes bank payment receipts and invoices (PDFs) using Claude as an AI backbone.
+The system has three layers. See `requirements/OVERVIEW.md` for the conceptual overview.
+
+### Acquisition layer — `fetcher.py`
+
+Downloads invoice PDFs from configured sources (Google Workspace email via OAuth, local filesystem paths) into the session `invoices/` directory. De-duplicates across runs via a SHA-256 content registry. Runs standalone or is invoked automatically by the orchestration layer.
+
+### Journal reader — `journal_reader.py`
+
+Reads the last receipt number and latest payment date from the original journal Excel workbook (`.xlsx`). Cross-checks the receipt number against the permanent merged PDF archive to detect inconsistencies before a run starts. Used by the orchestration layer; can also be called standalone.
+
+### Orchestration layer — `run.py`
+
+The normal entry point for a bookkeeping session. Uses the journal reader to obtain session parameters, guides the user through the one manual step (downloading bank payment receipts), then runs fetcher and fibutool in sequence. Offers abort / retry / continue at every stage.
+
+### Processing layer — `fibutool` (`main.py`)
+
+Core bookkeeping pipeline using Claude as AI backbone.
 
 **Pipeline (4 steps):**
 
@@ -93,17 +109,31 @@ pip install -e .      :: reinstall so fibutool --version reflects the new tag
 
 ## Usage
 
-Prepare a session directory with `payments/` and `invoices/` subfolders, then `cd` into it:
+### Typical session — via orchestrator
+
+Create a session directory, then run the orchestrator. It reads the journal, prompts for payment receipts, fetches invoices, and processes everything automatically:
 
 ```bat
-cd C:\fibu\2025-Q4
+cd C:\fibu\2026-Q2
 mkdir payments payments-ordered invoices merged
-:: copy your PDFs into payments\ and invoices\
 
-fibutool --last-receipt-number 108
+python run.py --workdir .
 ```
 
-**Common commands:**
+### Fetcher — standalone
+
+```bat
+:: Download invoices from all configured sources since a date:
+python fetcher.py --since 2026-03-01
+
+:: Dry run — show what would be downloaded without writing anything:
+python fetcher.py --since 2026-03-01 --dry-run
+
+:: Only one source:
+python fetcher.py --since 2026-03-01 --only office
+```
+
+### Processing layer — standalone
 
 ```bat
 :: Normal run — last receipt was 108, next will be 109:
@@ -112,44 +142,37 @@ fibutool -n 108
 :: Remove output from a previous run before re-running:
 fibutool -n 108 --clean
 
-:: Resume after adding missing invoices — if a previous run left unmatched payments,
-:: drop the missing invoice PDFs into invoices\ and re-run without --clean.
-:: fibutool detects match_results.json, extracts only the new invoices,
-:: re-matches the previously unmatched payments, and regenerates all output.
-:: -n is not required in resume mode (payments are already ordered):
+:: Resume after adding missing invoices (no -n required):
 fibutool
 
-:: Regenerate journal.csv only (no API calls) — useful after editing journal rules:
+:: Regenerate journal.csv only (no API calls):
 fibutool --journal-only
 
 :: Test with a single payment + invoice (3 API calls total):
-fibutool -n 108 --clean \
-    --only-payment payments\receipt.pdf \
-    --only-invoice invoices\invoice.pdf
-
-:: Use a non-default config (e.g. for testing):
-fibutool -n 108 --config C:\path\to\other-config.yaml
-
-:: Run in a specific work directory without cd-ing into it:
-fibutool -n 108 --workdir C:\fibu\2025-Q4
+fibutool -n 108 --clean --only-payment payments\receipt.pdf --only-invoice invoices\invoice.pdf
 ```
 
-Every run writes a timestamped log file (`<ISO-datetime>_fibutool.log`) to the work directory alongside the other output files.
+Every tool writes a timestamped log file to the work directory.
 
 ## Folder layout
 
 ```
 <work directory>/               ← per-session; default: current directory
-  payments/                     ← input: bank payment confirmation PDFs
-  invoices/                     ← input: invoice PDFs (incoming and outgoing)
+  payments/                     ← input: bank payment confirmation PDFs (placed manually)
+  invoices/                     ← input: invoice PDFs (fetched automatically or placed manually)
   payments-ordered/             ← output: payments renamed NNN_YYYY-MM-DD_<orig>.pdf
   merged/                       ← output: merged PDFs (invoice pages first, then payment)
   journal.csv                   ← output: journal rows ready for import into Excel
   match_results.json            ← intermediary: extracted + matched data; required for --journal-only and resume mode
+  fetcher_seen.json             ← fetcher state: registry of already-downloaded files (de-duplication)
   <ISO-datetime>_fibutool.log   ← log: full stdout + stderr for this run
+  <ISO-datetime>_fetcher.log    ← log: full stdout + stderr for fetcher runs
 
-%APPDATA%\fibutool\             ← app directory; shared across all sessions
-  config.yaml                   ← API key, company names, and matching rules
+<app directory>/                ← shared across all sessions; default: script directory
+  config.yaml                   ← all configuration: API keys, rules, sources, journal workbook path
+
+<permanent merged directory>/   ← user-maintained archive of all merged PDFs across sessions
+                                   configured in config.yaml; used by journal_reader for cross-check
 ```
 
 ## Config reference
@@ -186,6 +209,8 @@ mixed_vat_label: "gemischt"    # label written to VAT% column when positions hav
 decimal_separator: ","          # "," for Austrian/German Excel, "." for English
 ig_vat_rate: 20                 # VAT rate used for IG self-assessment (Erwerbsteuer)
 ```
+
+For `fetcher` sources (`gmail_sources`, `filesystem_sources`) and `original_journal` configuration, see the annotated `config.yaml.example` in the repo root.
 
 ## Development environment
 

@@ -62,29 +62,6 @@ def read_journal_state(config: dict) -> tuple[int, date]:
 
 ---
 
-## run.py — session orchestrator
-
-`run.py` uses `journal_reader` to drive the full bookkeeping workflow:
-
-1. Call `read_journal_state(config)` → `(N, last_payment_date)`
-2. Compute `since_date = last_payment_date - timedelta(days=since_offset_days)`
-3. Display values; prompt user to download bank payment receipts since `since_date`
-4. Run `fetcher.py --since since_date --workdir ... --config ...`
-5. Run `main.py -n N --workdir ... --config ...`
-
-At every failing stage the user is prompted: **[a]bort / [r]etry / [c]ontinue**.
-
-- Journal read failure + continue: prompts for manual entry of receipt number and since date.
-- Fetcher failure + continue: proceeds to fibutool with whatever invoices were collected.
-- Fibutool failure + continue: accepts the partial result and exits.
-
-**CLI flags for run.py:**
-- `--workdir / -w`: work directory for this session (default: current directory)
-- `--config / -c`: config file override
-
----
-
 ## Prospect — future extensions
 
-- `run.py` resume mode: detect an existing `match_results.json` and offer to resume from it instead of starting fresh (see BACKLOG).
-- Write `journal.csv` output back into the original Excel workbook as a new sheet (see BACKLOG).
+- Append `journal.csv` output into an existing sheet in the original Excel workbook (see BACKLOG).

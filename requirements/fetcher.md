@@ -1,6 +1,6 @@
 # fetcher — Requirements
 
-fetcher downloads invoice documents from Google Workspace email accounts and deposits them as PDF files into the fibutool `invoices/` directory, eliminating manual download work between bookkeeping runs.
+fetcher downloads invoice documents from configured sources (Google Workspace email accounts, local filesystem paths) and deposits them as PDF files into the fibutool `invoices/` directory, eliminating manual download work between bookkeeping runs.
 
 ---
 
@@ -125,7 +125,7 @@ One pass per configured filesystem source.
 | **Dry run** | `--dry-run` | List what would be downloaded; do not write files or update registry |
 
 **Flags:**
-- `--since YYYY-MM-DD` *(required)*: skip messages received before this date.
+- `--since YYYY-MM-DD` *(required)*: for Gmail sources, skip messages received before this date; for filesystem sources, skip files with mtime before this date (when `filter_by_mtime: true`).
 - `--workdir <path>`: work directory (default: current directory).
 - `--config <path>`: config file override.
 - `--only <label>`: process only the named source.
@@ -150,7 +150,9 @@ If two sources deliver a file named `Rechnung.pdf`, the second file is saved as 
 
 ## Prospect — future source types
 
-The following source types are out of scope for the MVP but are the natural next steps.
+### IMAP
+
+A generic IMAP source would reuse the Gmail PDF-attachment logic with an IMAP client instead of the Gmail API. Config would follow the same structure as `gmail_sources` (label, folders, filters) with additional fields for host, port, and credentials (app password or XOAUTH2). See BACKLOG.
 
 ### Web portals
 
@@ -162,7 +164,3 @@ def fetch(config: dict, since: date, invoices_dir: Path, seen: SeenRegistry) -> 
 ```
 
 The portal module is responsible for authentication (typically a stored API key or session cookie), navigation, and download. De-duplication uses the same seen registry with a canonical key of `<label>/<portal-internal-document-id>`.
-
-### Filesystem sources
-
-Implemented in Step 2. See configuration under `filesystem_sources`.
