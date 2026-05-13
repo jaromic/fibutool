@@ -1,19 +1,24 @@
-"""fetcher — Gmail invoice downloader for fibutool.
+"""fetcher — invoice document downloader for fibutool.
 
-Downloads PDF attachments from configured Google Workspace accounts and
-deposits them into the fibutool invoices/ directory.
+Downloads PDF attachments from configured sources (Gmail, IMAP, local filesystem)
+and deposits them into the fibutool invoices/ directory.
 
 Authentication
 --------------
-Uses Gmail API with OAuth 2.0 (readonly scope). On first run for a source,
-opens a browser for the consent flow and saves the token to token_file.
-Subsequent runs load and auto-refresh the token automatically.
+Gmail:  OAuth 2.0 (readonly scope). On first run opens a browser for the consent
+        flow and saves the token to token_file. Subsequent runs auto-refresh.
+IMAP:   Password stored in the OS keyring (via the keyring library). On first run
+        prompts the user; stores the password only after a successful login.
 """
 
 import argparse
 import base64
+import email
+import email.header
 import fnmatch
+import getpass
 import hashlib
+import imaplib
 import json
 import os.path
 import shutil
@@ -21,9 +26,13 @@ import sys
 from datetime import date, datetime, time
 from pathlib import Path
 
+import keyring
 import yaml
 
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+IMAP_KEYRING_SERVICE = "fibutool-fetcher"
+_IMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
 # ── Seen registry ─────────────────────────────────────────────────────────────
@@ -65,6 +74,7 @@ class _Tee:
     def write(self, text):
         for s in self._streams:
             s.write(text)
+            s.flush()
 
     def flush(self):
         for s in self._streams:
@@ -232,6 +242,73 @@ def _safe_filename(invoices_dir: Path, name: str) -> Path:
 
 def _sha256_of_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+# ── IMAP helpers ──────────────────────────────────────────────────────────────
+
+def _imap_date(d: date) -> str:
+    """Format a date as DD-Mon-YYYY for IMAP SINCE criterion."""
+    return f"{d.day:02d}-{_IMAP_MONTHS[d.month - 1]}-{d.year}"
+
+
+def _authenticate_imap(source: dict) -> imaplib.IMAP4_SSL:
+    """Connect and log in to an IMAP server.
+
+    Looks up the password in the OS keyring. If absent, prompts the user.
+    Tries once; if the login fails, prompts again for a new password and retries
+    once more. Stores the password in the keyring only after a successful login.
+    """
+    host: str = source["host"]
+    port: int = source.get("port", 993)
+    username: str = source["username"]
+    label: str = source.get("label", host)
+    keyring_key = f"{label}:{username}"
+
+    password = keyring.get_password(IMAP_KEYRING_SERVICE, keyring_key)
+
+    for attempt in range(2):
+        if password is None:
+            password = getpass.getpass(
+                f"IMAP password for {username}@{host} (source [{label}]): "
+            )
+        try:
+            conn = imaplib.IMAP4_SSL(host, port)
+            conn.login(username, password)
+            keyring.set_password(IMAP_KEYRING_SERVICE, keyring_key, password)
+            return conn
+        except imaplib.IMAP4.error:
+            print(f"  authentication failed for {username}@{host} (attempt {attempt + 1})")
+            password = None  # force re-prompt on next iteration
+
+    raise RuntimeError(f"[fetcher/{label}] IMAP authentication failed after 2 attempts")
+
+
+def _imap_pdf_attachments(raw_bytes: bytes) -> list[tuple[str, bytes]]:
+    """Parse a raw RFC 2822 message and return (filename, data) for every PDF attachment."""
+    msg = email.message_from_bytes(raw_bytes)
+    results: list[tuple[str, bytes]] = []
+    for part in msg.walk():
+        content_type = part.get_content_type()
+        disposition = part.get("Content-Disposition", "")
+        if content_type != "application/pdf" and not part.get_filename("").lower().endswith(".pdf"):
+            continue
+        if "attachment" not in disposition.lower() and "inline" not in disposition.lower():
+            # also accept parts with no explicit disposition when they look like PDFs
+            if content_type != "application/pdf":
+                continue
+        raw_filename = part.get_filename("")
+        if raw_filename:
+            decoded_parts = email.header.decode_header(raw_filename)
+            filename = "".join(
+                fragment.decode(enc or "utf-8") if isinstance(fragment, bytes) else fragment
+                for fragment, enc in decoded_parts
+            )
+        else:
+            filename = "attachment.pdf"
+        data = part.get_payload(decode=True)
+        if data:
+            results.append((filename, data))
+    return results
 
 
 # ── Source processing ─────────────────────────────────────────────────────────
@@ -417,6 +494,123 @@ def _process_filesystem_source(
     return saved_files, warnings
 
 
+def _process_imap_source(
+    source: dict,
+    since: date,
+    invoices_dir: Path,
+    seen: SeenRegistry,
+    dry_run: bool,
+) -> tuple[list[str], list[str]]:
+    label = source.get("label", "?")
+    username = source.get("username", "?")
+    senders: list[str] = source.get("filters", {}).get("senders", [])
+    subject_keywords: list[str] = source.get("filters", {}).get("subject_keywords", [])
+    folders: list[str] = source.get("folders", ["INBOX"])
+
+    print(f"\nSource [{label}] ({username})")
+
+    try:
+        conn = _authenticate_imap(source)
+    except Exception as e:
+        return [], [f"[fetcher/{label}] authentication failed: {e}"]
+
+    saved_files: list[str] = []
+    warnings: list[str] = []
+    since_str = _imap_date(since)
+
+    try:
+        for folder in folders:
+            try:
+                status, _ = conn.select(folder, readonly=True)
+                if status != "OK":
+                    warnings.append(f"[fetcher/{label}] could not select folder '{folder}'")
+                    continue
+            except imaplib.IMAP4.error as e:
+                warnings.append(f"[fetcher/{label}] error selecting folder '{folder}': {e}")
+                continue
+
+            print(f"  [{folder}] SEARCH SINCE {since_str}")
+
+            try:
+                status, data = conn.uid("SEARCH", None, f"SINCE {since_str}")
+                if status != "OK":
+                    warnings.append(f"[fetcher/{label}] SEARCH failed in '{folder}'")
+                    continue
+            except imaplib.IMAP4.error as e:
+                warnings.append(f"[fetcher/{label}] SEARCH error in '{folder}': {e}")
+                continue
+
+            uids = data[0].split() if data[0] else []
+            print(f"  {len(uids)} message(s) returned")
+
+            for uid in uids:
+                try:
+                    status, msg_data = conn.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID)])")
+                    if status != "OK" or not msg_data or not msg_data[0]:
+                        warnings.append(f"[fetcher/{label}] failed to fetch headers for UID {uid.decode()}")
+                        continue
+                except imaplib.IMAP4.error as e:
+                    warnings.append(f"[fetcher/{label}] error fetching headers for UID {uid.decode()}: {e}")
+                    continue
+
+                raw_headers = msg_data[0][1] if isinstance(msg_data[0], tuple) else b""
+                header_msg = email.message_from_bytes(raw_headers)
+                from_header = header_msg.get("From", "")
+                subject_raw = header_msg.get("Subject", "")
+                message_id = header_msg.get("Message-ID", uid.decode())
+
+                # Decode encoded subject header
+                decoded_subject_parts = email.header.decode_header(subject_raw)
+                subject_header = "".join(
+                    fragment.decode(enc or "utf-8") if isinstance(fragment, bytes) else fragment
+                    for fragment, enc in decoded_subject_parts
+                )
+
+                if not _matches_filters(from_header, subject_header, senders, subject_keywords):
+                    print(f"  skipped (subject filter): \"{subject_header}\"  (from: {from_header})")
+                    continue
+
+                try:
+                    status, msg_data = conn.uid("FETCH", uid, "(BODY.PEEK[])")
+                    if status != "OK" or not msg_data or not msg_data[0]:
+                        warnings.append(f"[fetcher/{label}] failed to fetch message UID {uid.decode()}")
+                        continue
+                except imaplib.IMAP4.error as e:
+                    warnings.append(f"[fetcher/{label}] error fetching message UID {uid.decode()}: {e}")
+                    continue
+
+                raw_bytes = msg_data[0][1] if isinstance(msg_data[0], tuple) else b""
+                attachments = _imap_pdf_attachments(raw_bytes)
+
+                if not attachments:
+                    print(f"  skipped (no PDF attachments): \"{subject_header}\"  (from: {from_header})")
+                    continue
+
+                for filename, pdf_bytes in attachments:
+                    canonical_key = f"{label}/{message_id}/{filename}"
+                    if seen.contains(canonical_key):
+                        print(f"  skipped (already downloaded): {filename}  (from: {from_header})")
+                        continue
+
+                    if dry_run:
+                        print(f"  [dry-run] would save: {filename}  (from: {from_header})")
+                        saved_files.append(filename)
+                        continue
+
+                    out_path = _safe_filename(invoices_dir, filename)
+                    out_path.write_bytes(pdf_bytes)
+                    seen.add(canonical_key)
+                    saved_files.append(out_path.name)
+                    print(f"  saved: {out_path.name}")
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+    return saved_files, warnings
+
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 def _print_summary(saved: list[str], warnings: list[str], dry_run: bool) -> None:
@@ -459,7 +653,8 @@ def main() -> None:
 
     all_sources: list[tuple[str, dict]] = (
         [("gmail", s) for s in fetcher_cfg.get("gmail_sources", [])] +
-        [("filesystem", s) for s in fetcher_cfg.get("filesystem_sources", [])]
+        [("filesystem", s) for s in fetcher_cfg.get("filesystem_sources", [])] +
+        [("imap", s) for s in fetcher_cfg.get("imap_sources", [])]
     )
 
     if args.only:
@@ -469,7 +664,7 @@ def main() -> None:
             sys.exit(1)
 
     if not all_sources:
-        print("fetcher: config error — no sources configured (add gmail_sources or filesystem_sources)", file=sys.stderr)
+        print("fetcher: config error — no sources configured (add gmail_sources, filesystem_sources, or imap_sources)", file=sys.stderr)
         sys.exit(1)
 
     all_saved: list[str] = []
@@ -478,6 +673,8 @@ def main() -> None:
     for source_type, source in all_sources:
         if source_type == "gmail":
             saved, warnings = _process_gmail_source(source, since, invoices_dir, seen, args.dry_run)
+        elif source_type == "imap":
+            saved, warnings = _process_imap_source(source, since, invoices_dir, seen, args.dry_run)
         else:
             saved, warnings = _process_filesystem_source(source, since, invoices_dir, seen, args.dry_run)
         all_saved.extend(saved)

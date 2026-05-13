@@ -61,6 +61,7 @@ class _Tee:
     def write(self, text):
         for s in self._streams:
             s.write(text)
+            s.flush()
 
     def flush(self):
         for s in self._streams:

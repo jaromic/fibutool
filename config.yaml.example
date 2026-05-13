@@ -61,3 +61,20 @@ fetcher:
       filename_patterns:        # glob patterns (default: ["*.pdf"])
         - "*.pdf"
       filter_by_mtime: true     # skip files older than --since (default: true)
+
+  imap_sources:
+    - label: "mail"             # human-readable name used in logs and --only filter
+      host: mail.example.com    # IMAP server hostname
+      port: 993                 # IMAP SSL port (default: 993)
+      username: office@example.com
+      # password stored in OS keyring (service "fibutool-fetcher", key "<label>:<username>")
+      # fetcher prompts on first run and stores after successful login
+      folders:
+        - INBOX
+      filters:                  # AND-combined; omit a list to accept any value
+        senders:                # substring match on From: header (client-side)
+          - "@supplier.com"
+        subject_keywords:       # substring match on Subject: header (case-insensitive)
+          - "Rechnung"
+          - "Invoice"
+          - "Gutschrift"

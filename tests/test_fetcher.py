@@ -1,18 +1,27 @@
 import base64
+import email.encoders
+import email.mime.base
+import email.mime.multipart
+import email.mime.text
+import imaplib
 import json
 import time
 from datetime import date
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from fetcher import (
     SeenRegistry,
+    _authenticate_imap,
     _find_pdf_parts,
+    _imap_date,
+    _imap_pdf_attachments,
     _matches_filters,
     _process_filesystem_source,
     _process_gmail_source,
+    _process_imap_source,
     _safe_filename,
     _sha256_of_file,
     pl_load_fetcher_config,
@@ -653,3 +662,394 @@ class TestProcessFilesystemSource:
         )
 
         assert saved == ["Rechnung_001.pdf"]
+
+
+# ── _imap_date ────────────────────────────────────────────────────────────────
+
+class TestImapDate:
+    def test_january_first(self):
+        assert _imap_date(date(2026, 1, 1)) == "01-Jan-2026"
+
+    def test_december_thirty_first(self):
+        assert _imap_date(date(2025, 12, 31)) == "31-Dec-2025"
+
+    def test_mid_year_date(self):
+        assert _imap_date(date(2026, 6, 15)) == "15-Jun-2026"
+
+    def test_single_digit_day_zero_padded(self):
+        assert _imap_date(date(2026, 3, 5)) == "05-Mar-2026"
+
+
+# ── _imap_pdf_attachments ─────────────────────────────────────────────────────
+
+def _make_raw_imap_email(
+    subject: str = "Test",
+    from_addr: str = "sender@example.com",
+    message_id: str = "<test@example.com>",
+    attachments: list[tuple[str, bytes]] | None = None,
+) -> bytes:
+    msg = email.mime.multipart.MIMEMultipart()
+    msg["From"] = from_addr
+    msg["Subject"] = subject
+    msg["Message-ID"] = message_id
+    msg.attach(email.mime.text.MIMEText("Body text"))
+    for filename, data in (attachments or []):
+        part = email.mime.base.MIMEBase("application", "pdf")
+        part.set_payload(data)
+        email.encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=filename)
+        msg.attach(part)
+    return msg.as_bytes()
+
+
+class TestImapPdfAttachments:
+    def test_single_pdf_attachment(self):
+        raw = _make_raw_imap_email(attachments=[("invoice.pdf", PDF_BYTES)])
+        results = _imap_pdf_attachments(raw)
+        assert len(results) == 1
+        assert results[0][0] == "invoice.pdf"
+        assert results[0][1] == PDF_BYTES
+
+    def test_no_attachments_returns_empty(self):
+        raw = _make_raw_imap_email()
+        assert _imap_pdf_attachments(raw) == []
+
+    def test_multiple_pdf_attachments(self):
+        raw = _make_raw_imap_email(attachments=[
+            ("invoice.pdf", PDF_BYTES),
+            ("receipt.pdf", b"%PDF-receipt"),
+        ])
+        results = _imap_pdf_attachments(raw)
+        assert len(results) == 2
+        names = {r[0] for r in results}
+        assert names == {"invoice.pdf", "receipt.pdf"}
+
+    def test_non_pdf_attachment_ignored(self):
+        msg = email.mime.multipart.MIMEMultipart()
+        msg["From"] = "a@b.com"
+        part = email.mime.base.MIMEBase("application", "zip")
+        part.set_payload(b"zipdata")
+        email.encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="archive.zip")
+        msg.attach(part)
+        assert _imap_pdf_attachments(msg.as_bytes()) == []
+
+
+# ── _authenticate_imap ────────────────────────────────────────────────────────
+
+def _make_imap_source(**overrides) -> dict:
+    base = {
+        "label": "mail",
+        "host": "mail.example.com",
+        "port": 993,
+        "username": "user@example.com",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestAuthenticateImap:
+    def test_uses_keyring_password(self):
+        with (
+            patch("fetcher.keyring.get_password", return_value="secret") as mock_get,
+            patch("fetcher.keyring.set_password") as mock_set,
+            patch("fetcher.imaplib.IMAP4_SSL") as mock_ssl,
+        ):
+            mock_conn = MagicMock()
+            mock_ssl.return_value = mock_conn
+            result = _authenticate_imap(_make_imap_source())
+
+        mock_get.assert_called_once_with("fibutool-fetcher", "mail:user@example.com")
+        mock_conn.login.assert_called_once_with("user@example.com", "secret")
+        mock_set.assert_called_once_with("fibutool-fetcher", "mail:user@example.com", "secret")
+        assert result is mock_conn
+
+    def test_prompts_when_no_keyring_password(self):
+        with (
+            patch("fetcher.keyring.get_password", return_value=None),
+            patch("fetcher.keyring.set_password"),
+            patch("fetcher.imaplib.IMAP4_SSL") as mock_ssl,
+            patch("fetcher.getpass.getpass", return_value="typed") as mock_prompt,
+        ):
+            mock_ssl.return_value = MagicMock()
+            _authenticate_imap(_make_imap_source())
+
+        mock_prompt.assert_called_once()
+
+    def test_retries_once_on_auth_failure(self):
+        mock_conn = MagicMock()
+        mock_conn.login.side_effect = [
+            imaplib.IMAP4.error("auth failed"),
+            None,
+        ]
+        with (
+            patch("fetcher.keyring.get_password", return_value="bad"),
+            patch("fetcher.keyring.set_password"),
+            patch("fetcher.imaplib.IMAP4_SSL", return_value=mock_conn),
+            patch("fetcher.getpass.getpass", return_value="good"),
+        ):
+            _authenticate_imap(_make_imap_source())
+
+        assert mock_conn.login.call_count == 2
+
+    def test_raises_after_two_failures(self):
+        mock_conn = MagicMock()
+        mock_conn.login.side_effect = imaplib.IMAP4.error("bad creds")
+        with (
+            patch("fetcher.keyring.get_password", return_value="bad"),
+            patch("fetcher.keyring.set_password"),
+            patch("fetcher.imaplib.IMAP4_SSL", return_value=mock_conn),
+            patch("fetcher.getpass.getpass", return_value="still_bad"),
+        ):
+            with pytest.raises(RuntimeError, match="authentication failed after 2 attempts"):
+                _authenticate_imap(_make_imap_source())
+
+    def test_stores_password_only_after_success(self):
+        mock_conn = MagicMock()
+        mock_conn.login.side_effect = [imaplib.IMAP4.error("bad"), None]
+        with (
+            patch("fetcher.keyring.get_password", return_value="wrong"),
+            patch("fetcher.keyring.set_password") as mock_set,
+            patch("fetcher.imaplib.IMAP4_SSL", return_value=mock_conn),
+            patch("fetcher.getpass.getpass", return_value="correct"),
+        ):
+            _authenticate_imap(_make_imap_source())
+
+        mock_set.assert_called_once_with("fibutool-fetcher", "mail:user@example.com", "correct")
+
+
+# ── _process_imap_source ──────────────────────────────────────────────────────
+
+def _make_imap_conn(
+    folder_status: str = "OK",
+    search_uids: list[bytes] | None = None,
+    header_responses: dict | None = None,
+    full_responses: dict | None = None,
+) -> MagicMock:
+    """Build a mock IMAP connection.
+
+    search_uids: list of UID bytes, e.g. [b"1", b"2"]
+    header_responses: {uid_bytes: (from_str, subject_str, message_id_str)}
+    full_responses: {uid_bytes: raw_email_bytes}
+    """
+    if search_uids is None:
+        search_uids = []
+    header_responses = header_responses or {}
+    full_responses = full_responses or {}
+
+    conn = MagicMock()
+    conn.select.return_value = (folder_status, [b"1"])
+
+    uid_data = b" ".join(search_uids) if search_uids else b""
+
+    def uid_side_effect(command, *args):
+        if command == "SEARCH":
+            return ("OK", [uid_data])
+        if command == "FETCH":
+            uid_arg = args[0]
+            fetch_spec = args[1] if len(args) > 1 else ""
+            if "HEADER.FIELDS" in fetch_spec:
+                resp = header_responses.get(uid_arg)
+                if resp is None:
+                    return ("NO", [None])
+                from_val, subj_val, msgid_val = resp
+                raw = f"From: {from_val}\r\nSubject: {subj_val}\r\nMessage-ID: {msgid_val}\r\n\r\n".encode()
+                return ("OK", [(b"literal", raw)])
+            else:
+                raw = full_responses.get(uid_arg, b"")
+                return ("OK", [(b"literal", raw)])
+        return ("NO", [None])
+
+    conn.uid.side_effect = uid_side_effect
+    return conn
+
+
+def _make_imap_source_cfg(**overrides) -> dict:
+    base = {
+        "label": "mail",
+        "host": "mail.example.com",
+        "port": 993,
+        "username": "user@example.com",
+        "folders": ["INBOX"],
+    }
+    base.update(overrides)
+    return base
+
+
+class TestProcessImapSource:
+    def test_downloads_pdf_attachment(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+        raw_email = _make_raw_imap_email(
+            subject="Rechnung",
+            from_addr="billing@supplier.com",
+            message_id="<msg1@example.com>",
+            attachments=[("invoice.pdf", PDF_BYTES)],
+        )
+        conn = _make_imap_conn(
+            search_uids=[b"1"],
+            header_responses={b"1": ("billing@supplier.com", "Rechnung", "<msg1@example.com>")},
+            full_responses={b"1": raw_email},
+        )
+
+        with patch("fetcher._authenticate_imap", return_value=conn):
+            saved, warnings = _process_imap_source(
+                _make_imap_source_cfg(), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        assert saved == ["invoice.pdf"]
+        assert (invoices_dir / "invoice.pdf").read_bytes() == PDF_BYTES
+        assert seen.contains("mail/<msg1@example.com>/invoice.pdf")
+        assert warnings == []
+
+    def test_dry_run_does_not_write_files(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+        raw_email = _make_raw_imap_email(
+            message_id="<m1@x.com>",
+            attachments=[("inv.pdf", PDF_BYTES)],
+        )
+        conn = _make_imap_conn(
+            search_uids=[b"1"],
+            header_responses={b"1": ("a@b.com", "Invoice", "<m1@x.com>")},
+            full_responses={b"1": raw_email},
+        )
+
+        with patch("fetcher._authenticate_imap", return_value=conn):
+            saved, _ = _process_imap_source(
+                _make_imap_source_cfg(), date(2026, 1, 1), invoices_dir, seen, dry_run=True
+            )
+
+        assert "inv.pdf" in saved
+        assert not (invoices_dir / "inv.pdf").exists()
+        assert len(seen._keys) == 0
+
+    def test_skips_already_seen(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+        seen.add("mail/<m1@x.com>/invoice.pdf")
+
+        raw_email = _make_raw_imap_email(
+            message_id="<m1@x.com>",
+            attachments=[("invoice.pdf", PDF_BYTES)],
+        )
+        conn = _make_imap_conn(
+            search_uids=[b"1"],
+            header_responses={b"1": ("a@b.com", "Rechnung", "<m1@x.com>")},
+            full_responses={b"1": raw_email},
+        )
+
+        with patch("fetcher._authenticate_imap", return_value=conn):
+            saved, _ = _process_imap_source(
+                _make_imap_source_cfg(), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        assert saved == []
+        assert not (invoices_dir / "invoice.pdf").exists()
+
+    def test_subject_filter_skips_non_matching(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+        conn = _make_imap_conn(
+            search_uids=[b"1"],
+            header_responses={b"1": ("a@b.com", "Newsletter", "<m1@x.com>")},
+        )
+
+        source = _make_imap_source_cfg(filters={"subject_keywords": ["Rechnung", "Invoice"]})
+        with patch("fetcher._authenticate_imap", return_value=conn):
+            saved, _ = _process_imap_source(
+                source, date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        assert saved == []
+
+    def test_auth_failure_returns_warning(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        with patch("fetcher._authenticate_imap", side_effect=RuntimeError("bad creds")):
+            saved, warnings = _process_imap_source(
+                _make_imap_source_cfg(), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        assert saved == []
+        assert any("authentication failed" in w for w in warnings)
+
+    def test_search_failure_returns_warning(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        conn = MagicMock()
+        conn.select.return_value = ("OK", [b"1"])
+        conn.uid.side_effect = imaplib.IMAP4.error("search failed")
+
+        with patch("fetcher._authenticate_imap", return_value=conn):
+            saved, warnings = _process_imap_source(
+                _make_imap_source_cfg(), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        assert saved == []
+        assert any("SEARCH error" in w for w in warnings)
+
+    def test_no_messages_returns_empty(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        conn = _make_imap_conn(search_uids=[])
+        with patch("fetcher._authenticate_imap", return_value=conn):
+            saved, warnings = _process_imap_source(
+                _make_imap_source_cfg(), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        assert saved == []
+        assert warnings == []
+
+    def test_logout_called_after_run(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        conn = _make_imap_conn(search_uids=[])
+        with patch("fetcher._authenticate_imap", return_value=conn):
+            _process_imap_source(
+                _make_imap_source_cfg(), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        conn.logout.assert_called_once()
+
+    def test_logout_called_even_on_error(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        conn = MagicMock()
+        conn.select.side_effect = Exception("unexpected")
+        with patch("fetcher._authenticate_imap", return_value=conn):
+            with pytest.raises(Exception):
+                _process_imap_source(
+                    _make_imap_source_cfg(), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+                )
+
+        conn.logout.assert_called_once()
+
+    def test_since_date_passed_to_search(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        conn = _make_imap_conn(search_uids=[])
+        with patch("fetcher._authenticate_imap", return_value=conn):
+            _process_imap_source(
+                _make_imap_source_cfg(), date(2026, 3, 15), invoices_dir, seen, dry_run=False
+            )
+
+        uid_calls = conn.uid.call_args_list
+        search_call = next(c for c in uid_calls if c.args[0] == "SEARCH")
+        assert "SINCE 15-Mar-2026" in search_call.args

@@ -6,6 +6,7 @@ google-auth>=2.0
 google-auth-oauthlib>=1.0
 google-api-python-client>=2.0
 openpyxl>=3.0
+keyring>=24.0
 
 # dev / build
 pytest>=8.0

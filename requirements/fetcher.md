@@ -1,6 +1,6 @@
 # fetcher — Requirements
 
-fetcher downloads invoice documents from configured sources (Google Workspace email accounts, local filesystem paths) and deposits them as PDF files into the fibutool `invoices/` directory, eliminating manual download work between bookkeeping runs.
+fetcher downloads invoice documents from configured sources (Google Workspace email accounts, generic IMAP accounts, local filesystem paths) and deposits them as PDF files into the fibutool `invoices/` directory, eliminating manual download work between bookkeeping runs.
 
 ---
 
@@ -8,9 +8,9 @@ fetcher downloads invoice documents from configured sources (Google Workspace em
 
 | Term | Meaning |
 |---|---|
-| Source | A configured input — either a Google Workspace account or a local filesystem path |
+| Source | A configured input — a Google Workspace account, a generic IMAP account, or a local filesystem path |
 | Seen registry | A persistent record of already-downloaded files, used for de-duplication |
-| Since date | The earliest date to include; for Gmail: message received date; for filesystem: file mtime |
+| Since date | The earliest date to include; for email sources: message received date; for filesystem: file mtime |
 | Canonical key | A stable identifier for a downloaded file stored in the seen registry |
 
 ---
@@ -55,7 +55,33 @@ fetcher:
       filename_patterns:        # glob patterns; default: ["*.pdf"]
         - "*.pdf"
       filter_by_mtime: true     # only copy files with mtime >= --since date (default: true)
+
+  imap_sources:
+    - label: "mail"             # human-readable name for logs and --only filter
+      host: mail.example.com    # IMAP server hostname
+      port: 993                 # IMAP SSL port (default: 993)
+      username: user@example.com
+      # password stored in OS keyring; fetcher prompts on first run
+      folders:
+        - INBOX
+      filters:                  # all filters are AND-combined; omit a list to match any value
+        senders:                # match any of these sender substrings (case-insensitive, client-side)
+          - "@supplier.com"
+        subject_keywords:       # match any of these subject substrings (case-insensitive)
+          - "Rechnung"
+          - "Invoice"
 ```
+
+---
+
+## Authentication — IMAP password (OS keyring)
+
+fetcher stores IMAP passwords in the OS keyring (via the `keyring` library). The keyring service name is `"fibutool-fetcher"`. The keyring key is `"<label>:<username>"`.
+
+- **F0.5** On first run for an IMAP source, fetcher looks up the password in the OS keyring. If absent, it prompts the user interactively.
+- **F0.6** After a successful login, fetcher stores the password in the keyring so subsequent runs are non-interactive.
+- **F0.7** If the login fails, fetcher prompts for a new password and retries once. If the second attempt also fails, fetcher raises an error.
+- **F0.8** The password is stored only after a successful login, never after a failed attempt.
 
 ---
 
@@ -72,11 +98,12 @@ fetcher uses the Gmail API with OAuth 2.0 and the `readonly` scope (`https://www
 
 ## Source types overview
 
-fetcher supports two source types. At least one source of any type must be configured.
+fetcher supports three source types. At least one source of any type must be configured.
 
 | Type | Config key | De-duplication key |
 |---|---|---|
 | Gmail | `gmail_sources` | `<label>/<gmail-message-id>/<filename>` |
+| IMAP | `imap_sources` | `<label>/<message-id-header>/<filename>` |
 | Filesystem | `filesystem_sources` | `local_fs/<sha256-of-file-content>` |
 
 The filesystem source uses a SHA-256 content hash as its canonical key. This means:
@@ -100,19 +127,35 @@ One pass per configured Gmail source.
 
 ---
 
-## Step 2 — Filesystem source processing
+## Step 2 — IMAP source processing
+
+One pass per configured IMAP source.
+
+- **F2.1** Authenticate using the OS keyring; see F0.5–F0.8.
+- **F2.2** For each configured folder: issue an IMAP `UID SEARCH SINCE <DD-Mon-YYYY>` command against the server.
+- **F2.3** Apply sender and subject filters client-side: a message must satisfy at least one sender match AND at least one subject keyword match (if both lists are non-empty). If a filter list is omitted, all values are accepted for that criterion.
+- **F2.4** For each matching message: parse the raw message bytes (RFC 2822) and collect all PDF attachments (content type `application/pdf` or filename ending `.pdf`).
+- **F2.5** Skip any attachment whose canonical key (`<source label>/<Message-ID header>/<filename>`) is already in the seen registry.
+- **F2.6** Save new PDFs to `invoices/` using the original attachment filename; append a numeric suffix before the extension if a filename collision occurs.
+- **F2.7** Record the canonical key in the seen registry after a successful save.
+- **F2.8** Access mailboxes read-only (`EXAMINE` / `readonly=True`). Do not modify messages, flags, or read status.
+- **F2.9** Call `LOGOUT` on the connection when done, even if an error occurred.
+
+---
+
+## Step 3 — Filesystem source processing
 
 One pass per configured filesystem source.
 
-- **F2.1** Resolve the configured `path` (expanding `~`). Emit a warning and skip the source if the path does not exist.
-- **F2.2** Collect files: non-recursive by default; recurse into subdirectories if `recursive: true`.
-- **F2.3** Apply filename pattern filter (glob): a file must match at least one pattern in `filename_patterns` (default: `["*.pdf"]`).
-- **F2.4** If `filter_by_mtime: true` (default), skip files whose mtime is before the `--since` date.
-- **F2.5** For each candidate: compute the SHA-256 hash of the file contents. The canonical key is `local_fs/<sha256>`.
-- **F2.6** Skip any file whose canonical key is already in the seen registry.
-- **F2.7** Copy new files to `invoices/` using the original filename; append a numeric suffix before the extension if a filename collision occurs.
-- **F2.8** Record the canonical key in the seen registry after a successful copy.
-- **F2.9** Do not modify, move, or delete the source files.
+- **F3.1** Resolve the configured `path` (expanding `~`). Emit a warning and skip the source if the path does not exist.
+- **F3.2** Collect files: non-recursive by default; recurse into subdirectories if `recursive: true`.
+- **F3.3** Apply filename pattern filter (glob): a file must match at least one pattern in `filename_patterns` (default: `["*.pdf"]`).
+- **F3.4** If `filter_by_mtime: true` (default), skip files whose mtime is before the `--since` date.
+- **F3.5** For each candidate: compute the SHA-256 hash of the file contents. The canonical key is `local_fs/<sha256>`.
+- **F3.6** Skip any file whose canonical key is already in the seen registry.
+- **F3.7** Copy new files to `invoices/` using the original filename; append a numeric suffix before the extension if a filename collision occurs.
+- **F3.8** Record the canonical key in the seen registry after a successful copy.
+- **F3.9** Do not modify, move, or delete the source files.
 
 ---
 
@@ -149,10 +192,6 @@ If two sources deliver a file named `Rechnung.pdf`, the second file is saved as 
 ---
 
 ## Prospect — future source types
-
-### IMAP
-
-A generic IMAP source would reuse the Gmail PDF-attachment logic with an IMAP client instead of the Gmail API. Config would follow the same structure as `gmail_sources` (label, folders, filters) with additional fields for host, port, and credentials (app password or XOAUTH2). See BACKLOG.
 
 ### Web portals
 
