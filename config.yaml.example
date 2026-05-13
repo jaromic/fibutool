@@ -29,6 +29,15 @@ position_business_rules:
   "Municipality Name":
     business_keywords: ["Office", "Business"]
 
+original_journal:
+  path: "~/Documents/Buchhaltung/Journal.xlsx"   # full path to the Excel journal workbook
+  sheet: "Journal"                                # worksheet name
+  payment_date_column: "Buchungsdatum"            # column header for booking/payment date
+  year_column: "Jahr"                             # column header for the year (integer)
+  receipt_number_column: "Belegnummer"            # column header for receipt number (integer, unique per year)
+  permanent_merged_dir: "~/Documents/Buchhaltung/Belege"  # archive of all merged PDFs (for cross-check)
+  since_offset_days: 14                           # fetcher --since = last_payment_date - N days
+
 fetcher:
   gmail_sources:
     - label: "office"           # human-readable name used in logs and --only filter
