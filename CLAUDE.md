@@ -7,7 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 * When I ask a question, answer the question.
 * When I instruct you to change something:
   * STOP. Before anything else — including forming a plan — run ALL before instructions from CLAUDE.local.md. This is not a checkbox. It requires genuine critical thinking on every dimension listed there. Only proceed to (A) or (B) after completing this.
-  * (A) For minor change of a few lines, just change it and run unit tests.
+  * (A) For minor change of a few lines
+    * STOP. Before anything else, run ALL instructions in "Minor Change Before instructions" in CLAUDE.local.md. Only proceed after that.
+    * Change it if still necessary and run unit tests
   * (B) All other changes:
     * first create a plan and then come back to me.
       * Prefer minimal solutions that keep the system as consistent and reliable as possible.
