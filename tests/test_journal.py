@@ -502,3 +502,46 @@ class TestComputedFields:
         )
         generate_csv([result], tmp_path / "journal.csv")
         assert _read_csv(tmp_path / "journal.csv")[0][15] == "17,41"
+
+
+class TestFilenameColumns:
+    def test_invoice_filename_in_col22(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice())
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][21] == "invoice.pdf"
+
+    def test_payment_filename_in_col23(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=_invoice())
+        generate_csv([result], tmp_path / "journal.csv")
+        assert _read_csv(tmp_path / "journal.csv")[0][22] == "payment.pdf"
+
+    def test_invoice_filename_empty_when_unmatched(self, tmp_path):
+        result = MatchResult(payment=_payment("120.00"), invoice=None)
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[21] == ""
+        assert row[22] == "payment.pdf"
+
+    def test_filenames_use_basename_only(self, tmp_path):
+        payment = PaymentInfo(
+            booking_date=date(2024, 1, 15),
+            amount=Decimal("120.00"),
+            currency="EUR",
+            counterparty="Supplier GmbH",
+            direction="outgoing",
+            pdf_path=Path("C:/fibu/2026-Q1/payments/bank_receipt_jan.pdf"),
+            receipt_number=1,
+        )
+        inv = InvoiceInfo(
+            invoice_date=date(2024, 1, 10),
+            gross_total=Decimal("120.00"),
+            currency="EUR",
+            counterparty="Supplier GmbH",
+            pdf_path=Path("/home/user/invoices/Rechnung_2024-01.pdf"),
+            vat_rate=20,
+        )
+        result = MatchResult(payment=payment, invoice=inv)
+        generate_csv([result], tmp_path / "journal.csv")
+        row = _read_csv(tmp_path / "journal.csv")[0]
+        assert row[21] == "Rechnung_2024-01.pdf"
+        assert row[22] == "bank_receipt_jan.pdf"

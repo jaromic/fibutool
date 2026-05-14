@@ -224,6 +224,8 @@ One row per payment. Encoding: UTF-8 with BOM. Delimiter: semicolon.
 | 19 | IG | IG VAT rate if reverse charge, else empty |
 | 20 | ESt abzugsfähig | (empty, unused) |
 | 21 | IG VAT (anteilig) | IG notional VAT if reverse charge, else empty |
+| 22 | Invoice file | Original invoice PDF filename; empty if unmatched |
+| 23 | Payment file | Original payment receipt PDF filename |
 
 ### Category rules
 

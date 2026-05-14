@@ -148,4 +148,6 @@ def generate_csv(
                 ig_str,                                             # IG
                 "",                                                 # ESt Betrag abzugsfähig (unused)
                 _eur(ig_vat_anteilig * sign, sep) if ig_vat_anteilig is not None else "",  # IG VAT amount (antlg.)
+                invoice.pdf_path.name if invoice else "",           # invoice filename
+                payment.pdf_path.name,                              # payment filename
             ])
