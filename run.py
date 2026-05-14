@@ -14,39 +14,12 @@ Stages
 import argparse
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 import yaml
 
-
-def _default_config_path() -> Path:
-    return Path(__file__).parent / "config.yaml"
-
-
-class _Tee:
-    def __init__(self, *streams):
-        self._streams = streams
-
-    def write(self, text):
-        for s in self._streams:
-            s.write(text)
-            s.flush()
-
-    def flush(self):
-        for s in self._streams:
-            s.flush()
-
-
-def _setup_logging(workdir: Path) -> None:
-    ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    log_path = workdir / f"{ts}_run.log"
-    try:
-        log_file = open(log_path, "w", encoding="utf-8")
-        sys.stdout = _Tee(sys.__stdout__, log_file)
-        sys.stderr = _Tee(sys.__stderr__, log_file)
-    except OSError as e:
-        print(f"run: warning — could not open log file {log_path}: {e}", file=sys.stderr)
+from shared import default_config_path, setup_logging
 
 
 def _parse_args() -> argparse.Namespace:
@@ -60,7 +33,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--config", "-c", type=Path, default=None, metavar="FILE",
-        help=f"Config file (default: {_default_config_path()})",
+        help=f"Config file (default: {default_config_path()})",
     )
     parser.add_argument(
         "--clean", action="store_true",
@@ -125,8 +98,8 @@ def _run_stage(label: str, cmd: list[str]) -> bool:
 def main() -> None:
     args = _parse_args()
     workdir = args.workdir.resolve()
-    _setup_logging(workdir)
-    config_path = (args.config if args.config is not None else _default_config_path()).resolve()
+    setup_logging(workdir, "run")
+    config_path = (args.config if args.config is not None else default_config_path()).resolve()
 
     with open(config_path, encoding="utf-8") as f:
         try:

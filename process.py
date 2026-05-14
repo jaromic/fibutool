@@ -14,7 +14,6 @@ Work directory — per-session; holds input PDFs, output files, log, and interme
 import argparse
 import shutil
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import anthropic
@@ -35,53 +34,13 @@ from matcher import match_payments
 from merger import merge_pdfs
 from models import InvoiceInfo, MatchResult
 from orderer import order_payments
+from shared import Tee, default_config_path, setup_logging
 
 try:
     from importlib.metadata import version as _pkg_version
     _VERSION = _pkg_version("fibutool")
 except Exception:
     _VERSION = "dev"
-
-
-# ── Directory helpers ────────────────────────────────────────────────────────
-
-def _default_config_path() -> Path:
-    """Return the default config path: config.yaml in the same directory as this script."""
-    return Path(__file__).parent / "config.yaml"
-
-
-# ── Logging ──────────────────────────────────────────────────────────────────
-
-class _Tee:
-    """Forward writes to multiple streams — copies console output to a log file."""
-
-    def __init__(self, *streams):
-        self._streams = streams
-
-    def write(self, text):
-        for s in self._streams:
-            s.write(text)
-            s.flush()
-
-    def flush(self):
-        for s in self._streams:
-            s.flush()
-
-
-def _setup_logging(workdir: Path) -> None:
-    """Open a timestamped log file in the work directory and tee stdout/stderr to it.
-
-    Log filename: <ISO-datetime>_fibutool.log
-    Falls back to console-only if the log file cannot be opened.
-    """
-    ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    log_path = workdir / f"{ts}_fibutool.log"
-    try:
-        log_file = open(log_path, "w", encoding="utf-8")
-        sys.stdout = _Tee(sys.__stdout__, log_file)
-        sys.stderr = _Tee(sys.__stderr__, log_file)
-    except OSError as e:
-        print(f"fibutool: warning — could not open log file {log_path}: {e}", file=sys.stderr)
 
 
 # ── Preflight ────────────────────────────────────────────────────────────────
@@ -167,8 +126,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config", "-c", type=Path, default=None, metavar="FILE",
         # App directory: shared config, survives across sessions.
-        # Default is platform-specific; see _default_config_path().
-        help=f"Config file (default: {_default_config_path()})",
+        help=f"Config file (default: {default_config_path()})",
     )
     parser.add_argument(
         "--clean", action="store_true",
@@ -414,9 +372,9 @@ def main() -> None:
         print("fibutool: error — --last-receipt-number / -n is required unless --journal-only is set or resuming from cache", file=sys.stderr)
         sys.exit(2)
 
-    _setup_logging(workdir)
+    setup_logging(workdir, "fibutool")
 
-    config_path = args.config if args.config is not None else _default_config_path()
+    config_path = args.config if args.config is not None else default_config_path()
     print(f"fibutool {_VERSION}  |  config: {config_path}  |  workdir: {workdir.resolve()}")
 
     payments_dir      = workdir / "payments"

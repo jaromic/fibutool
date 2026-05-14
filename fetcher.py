@@ -29,6 +29,8 @@ from pathlib import Path
 import keyring
 import yaml
 
+from shared import Tee, default_config_path, setup_logging
+
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 IMAP_KEYRING_SERVICE = "fibutool-fetcher"
 _IMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -60,38 +62,6 @@ class SeenRegistry:
         )
 
 
-# ── Shared utilities (mirrors process.py) ────────────────────────────────────
-
-def _default_config_path() -> Path:
-    """Return the default config path: config.yaml in the same directory as this script."""
-    return Path(__file__).parent / "config.yaml"
-
-
-class _Tee:
-    def __init__(self, *streams):
-        self._streams = streams
-
-    def write(self, text):
-        for s in self._streams:
-            s.write(text)
-            s.flush()
-
-    def flush(self):
-        for s in self._streams:
-            s.flush()
-
-
-def _setup_logging(workdir: Path) -> None:
-    ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    log_path = workdir / f"{ts}_fetcher.log"
-    try:
-        log_file = open(log_path, "w", encoding="utf-8")
-        sys.stdout = _Tee(sys.__stdout__, log_file)
-        sys.stderr = _Tee(sys.__stderr__, log_file)
-    except OSError as e:
-        print(f"fetcher: warning — could not open log file {log_path}: {e}", file=sys.stderr)
-
-
 # ── Argument parsing and configuration ───────────────────────────────────────
 
 def _parse_args() -> argparse.Namespace:
@@ -109,7 +79,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--config", "-c", type=Path, default=None, metavar="FILE",
-        help=f"Config file (default: {_default_config_path()})",
+        help=f"Config file (default: {default_config_path()})",
     )
     parser.add_argument(
         "--only", metavar="LABEL", default=None,
@@ -635,9 +605,9 @@ def main() -> None:
     args = _parse_args()
     workdir = args.workdir
 
-    _setup_logging(workdir)
+    setup_logging(workdir, "fetcher")
 
-    config_path = args.config if args.config is not None else _default_config_path()
+    config_path = args.config if args.config is not None else default_config_path()
     print(f"fetcher  |  config: {config_path}  |  workdir: {workdir.resolve()}")
 
     config = _load_config(config_path)
