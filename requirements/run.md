@@ -9,7 +9,7 @@
 - Read last receipt number and latest payment date from the original journal (via `journal_reader`)
 - Compute the fetcher since date as `latest_payment_date - since_offset_days`
 - Guide the user through the one manual step (downloading bank payment receipts)
-- Run the acquisition layer (fetcher) and processing layer (fibutool) as subprocesses in sequence
+- Run the acquisition layer (fetcher) and processing layer (fibutool) as subprocesses in sequence, streaming their output through the orchestrator's own Tee so all output is captured in a single session log
 - Offer abort / retry / continue recovery at every failing stage
 
 ---
@@ -35,7 +35,8 @@
 ### Stage 3 — Acquisition (fetcher)
 
 - **R3.1** Run the acquisition layer with `--since since_date --workdir <workdir> --config <config>`.
-- **R3.2** On non-zero exit: prompt **[a]bort / [r]etry / [c]ontinue**.
+- **R3.2** Stream stdout and stderr of the subprocess through the orchestrator's Tee (merged into a single stream). The exit code is reported on non-zero exit.
+- **R3.3** On non-zero exit: prompt **[a]bort / [r]etry / [c]ontinue**.
   - Abort: exit.
   - Retry: re-run fetcher.
   - Continue: proceed to Stage 4 with whatever invoices were collected.
@@ -43,7 +44,8 @@
 ### Stage 4 — Processing (fibutool)
 
 - **R4.1** Run the processing layer with `-n last_receipt_number --workdir <workdir> --config <config>`.
-- **R4.2** On non-zero exit: prompt **[a]bort / [r]etry / [c]ontinue**.
+- **R4.2** Stream stdout and stderr of the subprocess through the orchestrator's Tee (merged). The exit code is reported on non-zero exit.
+- **R4.3** On non-zero exit: prompt **[a]bort / [r]etry / [c]ontinue**.
   - Abort: exit.
   - Retry: re-run fibutool.
   - Continue: accept the partial result and exit.
@@ -57,9 +59,15 @@
 
 ---
 
+## Logging
+
+- **R5.1** On startup (after workdir is known), open `<ISO-datetime>_run.log` in the work directory. Mirror all output (stdout and stderr) to this file via a `_Tee`.
+- **R5.2** Subprocess output is streamed through the orchestrator's `sys.stdout` Tee, so it appears in both the terminal and `_run.log`. The child processes may also write their own per-tool log files (`_fetcher.log`, `_fibutool.log`) when run standalone or for additional detail.
+
+---
+
 ## Error handling notes
 
-- Subprocess failures are currently reported by exit code only. Improving error surfacing (capturing stderr, displaying structured failure detail) is tracked in BACKLOG.
 - On Ctrl+C at any interactive prompt, run.py exits immediately.
 
 ---
@@ -68,4 +76,3 @@
 
 See BACKLOG for:
 - Resume mode: detect existing `match_results.json` and offer to resume the processing layer instead of a full run
-- Improved subprocess error reporting

@@ -14,7 +14,7 @@ Stages
 import argparse
 import subprocess
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import yaml
@@ -22,6 +22,31 @@ import yaml
 
 def _default_config_path() -> Path:
     return Path(__file__).parent / "config.yaml"
+
+
+class _Tee:
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, text):
+        for s in self._streams:
+            s.write(text)
+            s.flush()
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
+
+def _setup_logging(workdir: Path) -> None:
+    ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    log_path = workdir / f"{ts}_run.log"
+    try:
+        log_file = open(log_path, "w", encoding="utf-8")
+        sys.stdout = _Tee(sys.__stdout__, log_file)
+        sys.stderr = _Tee(sys.__stderr__, log_file)
+    except OSError as e:
+        print(f"run: warning — could not open log file {log_path}: {e}", file=sys.stderr)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -85,16 +110,30 @@ def _prompt_arc(stage: str) -> str:
 
 
 def _run_stage(label: str, cmd: list[str]) -> bool:
-    """Run a subprocess stage. Returns True on success."""
+    """Run a subprocess stage, streaming output through the parent Tee. Returns True on success."""
     print(f"\n{'─' * 60}")
     print(f"  {label}")
     print(f"{'─' * 60}")
-    return subprocess.run(cmd).returncode == 0
+    with subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    ) as proc:
+        for line in proc.stdout:
+            sys.stdout.write(line)
+        proc.wait()
+        returncode = proc.returncode
+    if returncode != 0:
+        print(f"\n  Exit code: {returncode}", file=sys.stderr)
+    return returncode == 0
 
 
 def main() -> None:
     args = _parse_args()
     workdir = args.workdir.resolve()
+    _setup_logging(workdir)
     config_path = (args.config if args.config is not None else _default_config_path()).resolve()
 
     with open(config_path, encoding="utf-8") as f:

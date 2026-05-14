@@ -165,8 +165,9 @@ Every tool writes a timestamped log file to the work directory.
   journal.csv                   ← output: journal rows ready for import into Excel
   match_results.json            ← intermediary: extracted + matched data; required for --journal-only and resume mode
   fetcher_seen.json             ← fetcher state: registry of already-downloaded files (de-duplication)
-  <ISO-datetime>_fibutool.log   ← log: full stdout + stderr for this run
-  <ISO-datetime>_fetcher.log    ← log: full stdout + stderr for fetcher runs
+  <ISO-datetime>_run.log        ← log: complete session transcript when run via fibutool orchestrator
+  <ISO-datetime>_fibutool.log   ← log: processing layer transcript (standalone runs or detail)
+  <ISO-datetime>_fetcher.log    ← log: fetcher transcript (standalone runs or detail)
 
 <app directory>/                ← shared across all sessions; default: script directory
   config.yaml                   ← all configuration: API keys, rules, sources, journal workbook path
