@@ -43,9 +43,10 @@
 
 ### Stage 4 — Processing (fibutool)
 
-- **R4.1** Run the processing layer with `-n last_receipt_number --workdir <workdir> --config <config>`.
-- **R4.2** Stream stdout and stderr of the subprocess through the orchestrator's Tee (merged). The exit code is reported on non-zero exit.
-- **R4.3** On non-zero exit: prompt **[a]bort / [r]etry / [c]ontinue**.
+- **R4.1** If `match_results.json` exists in the work directory and `--clean` was not passed: invoke the processing layer **without** `-n` (resume mode — the receipt number is already in the cache). Print a notice to the user.
+- **R4.2** Otherwise (no `match_results.json`, or `--clean` passed): invoke with `-n last_receipt_number` for a full run. If `--clean` was passed, also forward `--clean` to the processing layer.
+- **R4.3** Stream stdout and stderr of the subprocess through the orchestrator's Tee (merged). The exit code is reported on non-zero exit.
+- **R4.4** On non-zero exit: prompt **[a]bort / [r]etry / [c]ontinue**.
   - Abort: exit.
   - Retry: re-run fibutool.
   - Continue: accept the partial result and exit.
@@ -56,6 +57,7 @@
 
 - `--workdir / -w`: work directory for this session (default: current directory)
 - `--config / -c`: config file override (default: `config.yaml` in the script directory)
+- `--clean`: remove previous processing output and force a full run; forwarded to `fibutool-process`
 
 ---
 
@@ -74,5 +76,4 @@
 
 ## Known gaps and future work
 
-See BACKLOG for:
-- Resume mode: detect existing `match_results.json` and offer to resume the processing layer instead of a full run
+See BACKLOG for remaining items.

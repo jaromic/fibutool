@@ -62,6 +62,10 @@ def _parse_args() -> argparse.Namespace:
         "--config", "-c", type=Path, default=None, metavar="FILE",
         help=f"Config file (default: {_default_config_path()})",
     )
+    parser.add_argument(
+        "--clean", action="store_true",
+        help="Remove previous run output and force a full run (passed through to fibutool-process)",
+    )
     return parser.parse_args()
 
 
@@ -207,7 +211,14 @@ def main() -> None:
         # retry: loop
 
     # ── Stage 4: fibutool ─────────────────────────────────────────────────────
-    fibutool_cmd = fibutool_cmd_base + ["-n", str(receipt_number)]
+    match_results = workdir / "match_results.json"
+    if match_results.exists() and not args.clean:
+        print("\nResuming from existing match_results.json  (run with --clean to start fresh)")
+        fibutool_cmd = fibutool_cmd_base
+    else:
+        fibutool_cmd = fibutool_cmd_base + ["-n", str(receipt_number)]
+        if args.clean:
+            fibutool_cmd += ["--clean"]
     while True:
         if _run_stage("fibutool — processing session", fibutool_cmd):
             break
