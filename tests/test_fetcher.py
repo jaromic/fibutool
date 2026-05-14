@@ -355,6 +355,26 @@ class TestProcessGmailSource:
 
         assert saved == []
 
+    def test_filter_skips_shown_as_summary_count(self, tmp_path, capsys):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        service = _make_service(messages=[
+            {"id": "m1", "from": "a@b.com", "subject": "Newsletter",
+             "payload": {"mimeType": "text/plain", "filename": "", "body": {}}},
+            {"id": "m2", "from": "a@b.com", "subject": "Promo",
+             "payload": {"mimeType": "text/plain", "filename": "", "body": {}}},
+        ])
+
+        source = _make_source(tmp_path, filters={"subject_keywords": ["Rechnung"]})
+        with patch("fetcher._authenticate_gmail", return_value=service):
+            _process_gmail_source(source, date(2026, 1, 1), invoices_dir, seen, dry_run=False)
+
+        out = capsys.readouterr().out
+        assert "2 message(s) skipped by filter" in out
+        assert "skipped (subject filter)" not in out
+
     def test_filename_collision_appends_counter(self, tmp_path):
         invoices_dir = tmp_path / "invoices"
         invoices_dir.mkdir()
@@ -966,6 +986,26 @@ class TestProcessImapSource:
             )
 
         assert saved == []
+
+    def test_filter_skips_shown_as_summary_count(self, tmp_path, capsys):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+        conn = _make_imap_conn(
+            search_uids=[b"1", b"2"],
+            header_responses={
+                b"1": ("a@b.com", "Newsletter", "<m1@x.com>"),
+                b"2": ("a@b.com", "Promo", "<m2@x.com>"),
+            },
+        )
+
+        source = _make_imap_source_cfg(filters={"subject_keywords": ["Rechnung"]})
+        with patch("fetcher._authenticate_imap", return_value=conn):
+            _process_imap_source(source, date(2026, 1, 1), invoices_dir, seen, dry_run=False)
+
+        out = capsys.readouterr().out
+        assert "2 message(s) skipped by filter" in out
+        assert "skipped (subject filter)" not in out
 
     def test_auth_failure_returns_warning(self, tmp_path):
         invoices_dir = tmp_path / "invoices"

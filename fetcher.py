@@ -355,6 +355,7 @@ def _process_gmail_source(
 
         print(f"  {len(messages)} message(s) returned")
 
+        filter_skipped = 0
         for msg_stub in messages:
             msg_id = msg_stub["id"]
 
@@ -375,7 +376,7 @@ def _process_gmail_source(
             subject_header = headers.get("Subject", "")
 
             if not _matches_filters(from_header, subject_header, senders, subject_keywords):
-                print(f"  skipped (subject filter): \"{subject_header}\"  (from: {from_header})")
+                filter_skipped += 1
                 continue
 
             try:
@@ -431,6 +432,9 @@ def _process_gmail_source(
                 seen.add(canonical_key)
                 saved_files.append(out_path.name)
                 print(f"  saved: {out_path.name}")
+
+        if filter_skipped:
+            print(f"  {filter_skipped} message(s) skipped by filter")
 
     return saved_files, warnings
 
@@ -543,6 +547,7 @@ def _process_imap_source(
             uids = data[0].split() if data[0] else []
             print(f"  {len(uids)} message(s) returned")
 
+            filter_skipped = 0
             for uid in uids:
                 try:
                     status, msg_data = conn.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID)])")
@@ -567,7 +572,7 @@ def _process_imap_source(
                 )
 
                 if not _matches_filters(from_header, subject_header, senders, subject_keywords):
-                    print(f"  skipped (subject filter): \"{subject_header}\"  (from: {from_header})")
+                    filter_skipped += 1
                     continue
 
                 try:
@@ -602,6 +607,9 @@ def _process_imap_source(
                     seen.add(canonical_key)
                     saved_files.append(out_path.name)
                     print(f"  saved: {out_path.name}")
+
+            if filter_skipped:
+                print(f"  {filter_skipped} message(s) skipped by filter")
     finally:
         try:
             conn.logout()
