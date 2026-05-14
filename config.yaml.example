@@ -36,7 +36,6 @@ original_journal:
   year_column: "Jahr"                             # column header for the year (integer)
   receipt_number_column: "Belegnummer"            # column header for receipt number (integer, unique per year)
   permanent_merged_dir: "~/Documents/Buchhaltung/Belege"  # archive of all merged PDFs (for cross-check)
-  since_offset_days: 14                           # fetcher --since = last_payment_date - N days
 
 fetcher:
   gmail_sources:

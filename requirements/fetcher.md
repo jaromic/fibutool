@@ -10,7 +10,8 @@ fetcher downloads invoice documents from configured sources (Google Workspace em
 |---|---|
 | Source | A configured input — a Google Workspace account, a generic IMAP account, or a local filesystem path |
 | Seen registry | A persistent record of already-downloaded files, used for de-duplication |
-| Since date | The earliest date to include; for email sources: message received date; for filesystem: file mtime |
+| Since date | The earliest date to include; derived per source from `since_days`; for email: message date; for filesystem: file mtime |
+| `since_days` | Number of days to look back from today; configured per source or overridden via `--since-days` |
 | Canonical key | A stable identifier for a downloaded file stored in the seen registry |
 
 ---
@@ -37,6 +38,7 @@ fetcher:
   gmail_sources:
     - label: "office"           # human-readable name for logs
       username: office@example.com
+      since_days: 21            # look back 21 days from today
       client_secret_file: "~/.config/fibutool/client_secret_office.json"  # downloaded from Google Cloud Console
       token_file: "~/.config/fibutool/token_office.json"                  # created by fetcher on first run
       folders:                  # Gmail labels/folders to search (default: INBOX)
@@ -51,16 +53,17 @@ fetcher:
   filesystem_sources:
     - label: "outgoing"         # human-readable name for logs and --only filter
       path: "~/Documents/invoices/outgoing"
+      since_days: 45            # look back 45 days from today (longer cycle for credit notes)
       recursive: false          # recurse into subdirectories (default: false)
       filename_patterns:        # glob patterns; default: ["*.pdf"]
         - "*.pdf"
-      filter_by_mtime: true     # only copy files with mtime >= --since date (default: true)
 
   imap_sources:
     - label: "mail"             # human-readable name for logs and --only filter
       host: mail.example.com    # IMAP server hostname
       port: 993                 # IMAP SSL port (default: 993)
       username: user@example.com
+      since_days: 21            # look back 21 days from today
       # password stored in OS keyring; fetcher prompts on first run
       folders:
         - INBOX
@@ -150,7 +153,7 @@ One pass per configured filesystem source.
 - **F3.1** Resolve the configured `path` (expanding `~`). Emit a warning and skip the source if the path does not exist.
 - **F3.2** Collect files: non-recursive by default; recurse into subdirectories if `recursive: true`.
 - **F3.3** Apply filename pattern filter (glob): a file must match at least one pattern in `filename_patterns` (default: `["*.pdf"]`).
-- **F3.4** If `filter_by_mtime: true` (default), skip files whose mtime is before the `--since` date.
+- **F3.4** Skip files whose mtime is before the since date (derived from the source's `since_days`).
 - **F3.5** For each candidate: compute the SHA-256 hash of the file contents. The canonical key is `local_fs/<sha256>`.
 - **F3.6** Skip any file whose canonical key is already in the seen registry.
 - **F3.7** Copy new files to `invoices/` using the original filename; append a numeric suffix before the extension if a filename collision occurs.
@@ -163,16 +166,19 @@ One pass per configured filesystem source.
 
 | Mode | Trigger | Behaviour |
 |---|---|---|
-| **Full** | Default | Process all configured sources for the `since` date |
+| **Full** | Default | Process all configured sources, each using its own `since_days` |
 | **Source filter** | `--only <label>` | Process only the named source |
 | **Dry run** | `--dry-run` | List what would be downloaded; do not write files or update registry |
 
 **Flags:**
-- `--since YYYY-MM-DD` *(required)*: for Gmail sources, skip messages received before this date; for filesystem sources, skip files with mtime before this date (when `filter_by_mtime: true`).
+- `--since-days N` *(optional)*: override the per-source `since_days` for all sources — look back N days from today. Intended for manual one-off runs; when omitted, each source uses its configured `since_days`.
 - `--workdir <path>`: work directory (default: current directory).
 - `--config <path>`: config file override.
 - `--only <label>`: process only the named source.
 - `--dry-run`: report without downloading.
+
+**Per-source config key:**
+- `since_days` *(required unless `--since-days` is passed)*: integer number of days to look back from today. Each source type uses this to derive its cutoff date: email sources filter by message date; filesystem sources filter by file mtime.
 
 ---
 

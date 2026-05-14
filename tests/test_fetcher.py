@@ -472,7 +472,7 @@ class TestProcessFilesystemSource:
         seen = SeenRegistry(tmp_path / "seen.json")
 
         saved, warnings = _process_filesystem_source(
-            _make_fs_source(src, filter_by_mtime=False),
+            _make_fs_source(src),
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
@@ -490,7 +490,7 @@ class TestProcessFilesystemSource:
         seen = SeenRegistry(tmp_path / "seen.json")
 
         _process_filesystem_source(
-            _make_fs_source(src, filter_by_mtime=False),
+            _make_fs_source(src),
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
@@ -508,7 +508,7 @@ class TestProcessFilesystemSource:
         seen.add(f"local_fs/{hashlib.sha256(PDF_BYTES).hexdigest()}")
 
         saved, warnings = _process_filesystem_source(
-            _make_fs_source(src, filter_by_mtime=False),
+            _make_fs_source(src),
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
@@ -525,7 +525,7 @@ class TestProcessFilesystemSource:
         seen = SeenRegistry(tmp_path / "seen.json")
 
         saved, warnings = _process_filesystem_source(
-            _make_fs_source(src, filter_by_mtime=False),
+            _make_fs_source(src),
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
@@ -540,7 +540,7 @@ class TestProcessFilesystemSource:
         seen = SeenRegistry(tmp_path / "seen.json")
 
         saved, _ = _process_filesystem_source(
-            _make_fs_source(src, filter_by_mtime=False),
+            _make_fs_source(src),
             date(2026, 1, 1), invoices_dir, seen, dry_run=True,
         )
 
@@ -554,7 +554,7 @@ class TestProcessFilesystemSource:
         seen = SeenRegistry(tmp_path / "seen.json")
 
         saved, warnings = _process_filesystem_source(
-            _make_fs_source(tmp_path / "does_not_exist", filter_by_mtime=False),
+            _make_fs_source(tmp_path / "does_not_exist"),
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
@@ -571,7 +571,7 @@ class TestProcessFilesystemSource:
         seen = SeenRegistry(tmp_path / "seen.json")
 
         saved, _ = _process_filesystem_source(
-            _make_fs_source(src, filter_by_mtime=False),
+            _make_fs_source(src),
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
@@ -588,7 +588,7 @@ class TestProcessFilesystemSource:
         seen = SeenRegistry(tmp_path / "seen.json")
 
         saved, _ = _process_filesystem_source(
-            _make_fs_source(src, filter_by_mtime=False),
+            _make_fs_source(src),
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
@@ -604,7 +604,7 @@ class TestProcessFilesystemSource:
         seen = SeenRegistry(tmp_path / "seen.json")
 
         saved, _ = _process_filesystem_source(
-            _make_fs_source(src, recursive=True, filter_by_mtime=False),
+            _make_fs_source(src, recursive=True),
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
@@ -620,13 +620,13 @@ class TestProcessFilesystemSource:
         seen = SeenRegistry(tmp_path / "seen.json")
 
         saved, _ = _process_filesystem_source(
-            _make_fs_source(src, filter_by_mtime=False),
+            _make_fs_source(src),
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
         assert saved == []
 
-    def test_filter_by_mtime_excludes_old_files(self, tmp_path):
+    def test_mtime_excludes_old_files(self, tmp_path):
         src = tmp_path / "src"
         src.mkdir()
         old_file = src / "old_invoice.pdf"
@@ -649,7 +649,7 @@ class TestProcessFilesystemSource:
 
         assert saved == []
 
-    def test_filter_by_mtime_includes_recent_files(self, tmp_path):
+    def test_mtime_includes_recent_files(self, tmp_path):
         src = tmp_path / "src"
         src.mkdir()
         new_file = src / "new_invoice.pdf"
@@ -677,7 +677,7 @@ class TestProcessFilesystemSource:
         seen = SeenRegistry(tmp_path / "seen.json")
 
         saved, _ = _process_filesystem_source(
-            _make_fs_source(src, filename_patterns=["Rechnung_*.pdf"], filter_by_mtime=False),
+            _make_fs_source(src, filename_patterns=["Rechnung_*.pdf"]),
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 

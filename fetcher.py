@@ -23,7 +23,7 @@ import json
 import os.path
 import shutil
 import sys
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 import keyring
@@ -100,8 +100,8 @@ def _parse_args() -> argparse.Namespace:
         description="fetcher — Gmail invoice downloader for fibutool",
     )
     parser.add_argument(
-        "--since", metavar="YYYY-MM-DD", required=True,
-        help="Download attachments from messages received on or after this date (YYYY-MM-DD)",
+        "--since-days", metavar="N", type=int, default=None,
+        help="Override per-source since_days: look back N days from today across all sources",
     )
     parser.add_argument(
         "--workdir", "-w", type=Path, default=Path("."), metavar="DIR",
@@ -450,7 +450,6 @@ def _process_filesystem_source(
     src_path = Path(source["path"]).expanduser()
     recursive: bool = source.get("recursive", False)
     patterns: list[str] = source.get("filename_patterns", ["*.pdf"])
-    filter_mtime: bool = source.get("filter_by_mtime", True)
 
     print(f"\nSource [{label}] (filesystem: {src_path})")
 
@@ -458,14 +457,12 @@ def _process_filesystem_source(
         return [], [f"[fetcher/{label}] path does not exist: {src_path}"]
 
     candidates = list(src_path.rglob("*") if recursive else src_path.iterdir())
+    since_ts = datetime.combine(since, time()).timestamp()
     matching = [
         f for f in candidates
         if f.is_file() and any(fnmatch.fnmatch(f.name, p) for p in patterns)
+        and f.stat().st_mtime >= since_ts
     ]
-
-    if filter_mtime:
-        since_ts = datetime.combine(since, time()).timestamp()
-        matching = [f for f in matching if f.stat().st_mtime >= since_ts]
 
     print(f"  {len(matching)} file(s) matched")
 
@@ -646,12 +643,6 @@ def main() -> None:
     config = _load_config(config_path)
     fetcher_cfg = pl_load_fetcher_config(config)
 
-    try:
-        since = date.fromisoformat(args.since)
-    except ValueError:
-        print(f"fetcher: error — invalid date '{args.since}' — expected YYYY-MM-DD", file=sys.stderr)
-        sys.exit(1)
-
     invoices_dir = workdir / "invoices"
     if not os.path.exists(invoices_dir):
         print(f"  Directory {invoices_dir}/ does not exist — please create it.")
@@ -679,6 +670,15 @@ def main() -> None:
     all_warnings: list[str] = []
 
     for source_type, source in all_sources:
+        label = source.get("label", "?")
+        since_days = args.since_days if args.since_days is not None else source.get("since_days")
+        if since_days is None:
+            print(f"fetcher: error — source [{label}] has no since_days configured and --since-days was not provided", file=sys.stderr)
+            all_warnings.append(f"[fetcher/{label}] skipped — no since_days configured")
+            continue
+        since = date.today() - timedelta(days=since_days)
+        print(f"  since: {since}  ({since_days} days ago)")
+
         if source_type == "gmail":
             saved, warnings = _process_gmail_source(source, since, invoices_dir, seen, args.dry_run)
         elif source_type == "imap":

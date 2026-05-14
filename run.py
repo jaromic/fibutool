@@ -14,7 +14,7 @@ Stages
 import argparse
 import subprocess
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 
 import yaml
@@ -69,11 +69,10 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _prompt_manual_journal_state() -> tuple[int, str]:
-    """Prompt the user to enter receipt number and since date manually.
+def _prompt_manual_journal_state() -> int:
+    """Prompt the user to enter receipt number manually.
 
-    Returns (receipt_number, since_str). Aborts the process on Ctrl+C or
-    invalid receipt number. Re-prompts until a valid YYYY-MM-DD date is entered.
+    Returns receipt_number. Aborts the process on Ctrl+C, reprompts on invalid receipt number.
     """
     receipt_number: int | None = None
     while receipt_number is None:
@@ -84,17 +83,6 @@ def _prompt_manual_journal_state() -> tuple[int, str]:
             sys.exit(1)
         except ValueError:
             print("  Invalid receipt number — please enter an integer.")
-
-    while True:
-        try:
-            since_str = input("  Enter fetcher since date (YYYY-MM-DD): ").strip()
-            date.fromisoformat(since_str)
-            return receipt_number, since_str
-        except KeyboardInterrupt:
-            print("\nAborted.", file=sys.stderr)
-            sys.exit(1)
-        except ValueError:
-            print(f"  Invalid date '{since_str}' — expected YYYY-MM-DD, please try again.")
 
 
 def _prompt_arc(stage: str) -> str:
@@ -157,18 +145,14 @@ def main() -> None:
     from journal_reader import read_journal_state
 
     receipt_number: int | None = None
-    since_str: str | None = None
+    last_payment_date: date | None = None
 
     while True:
         try:
             receipt_number, last_payment_date = read_journal_state(config)
-            offset = int(config.get("original_journal", {}).get("since_offset_days", 14))
-            since_date = last_payment_date - timedelta(days=offset)
-            since_str = str(since_date)
             print(f"\nJournal state:")
             print(f"  Last receipt number : {receipt_number}")
             print(f"  Latest payment date : {last_payment_date}")
-            print(f"  Fetcher since date  : {since_date}  (offset: -{offset} days)")
             break
         except Exception as e:
             print(f"\njournal_reader error: {e}", file=sys.stderr)
@@ -178,12 +162,15 @@ def main() -> None:
             elif choice == "retry":
                 continue
             else:  # continue — fall back to manual entry
-                receipt_number, since_str = _prompt_manual_journal_state()
+                receipt_number = _prompt_manual_journal_state()
                 break
 
     # ── Stage 2: user downloads payment receipts ──────────────────────────────
     payments_dir = workdir / "payments"
-    print(f"\nPlease download all bank payment receipts since {since_str}")
+    if last_payment_date:
+        print(f"\nPlease download all bank payment receipts since {last_payment_date}")
+    else:
+        print(f"\nPlease download all bank payment receipts")
     print(f"and place them in:  {payments_dir}")
     while True:
         try:
@@ -199,7 +186,7 @@ def main() -> None:
             break
 
     # ── Stage 3: fetcher ──────────────────────────────────────────────────────
-    fetcher_cmd = fetcher_cmd_base + ["--since", since_str]
+    fetcher_cmd = fetcher_cmd_base
     while True:
         if _run_stage("fetcher — downloading invoices", fetcher_cmd):
             break
