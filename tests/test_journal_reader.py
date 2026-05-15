@@ -42,7 +42,7 @@ def _make_config(wb_path: Path, merged_dir: Path, sheet: str = "Journal") -> dic
 
 
 def _write_merged_file(merged_dir: Path, receipt: int, year: int, month: int = 4, day: int = 1) -> None:
-    (merged_dir / f"{receipt:03d}_{year}-{month:02d}-{day:02d}_receipt.pdf").write_bytes(b"x")
+    (merged_dir / f"{year}-{receipt:03d}_{year}-{month:02d}-{day:02d}_receipt.pdf").write_bytes(b"x")
 
 
 # ── read_journal_state ────────────────────────────────────────────────────────

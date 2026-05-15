@@ -14,7 +14,7 @@ def order_payments(
     receipt_num = last_receipt_number + 1
     for payment in sorted_payments:
         new_name = (
-            f"{receipt_num:03d}_{payment.booking_date.isoformat()}_{payment.pdf_path.name}"
+            f"{payment.booking_date.year}-{receipt_num:03d}_{payment.booking_date.isoformat()}_{payment.pdf_path.name}"
         )
         dest = payments_ordered_dir / new_name
         shutil.copy2(payment.pdf_path, dest)

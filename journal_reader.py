@@ -142,7 +142,7 @@ def read_journal_state(config: dict) -> tuple[int, int, date]:
 def _cross_check_merged_dir(merged_dir: Path, year: int, expected: int) -> None:
     """Verify the permanent merged directory agrees with the Excel receipt number.
 
-    Files are expected to be named {NNN}_{YYYY}-{MM}-{DD}_{original}.pdf.
+    Files are expected to be named {YYYY}-{NNN}_{YYYY}-{MM}-{DD}_{original}.pdf.
     Only files whose date portion matches the given year are considered.
     If no files for the year are found, emits a warning and skips the check
     (valid on the first run of a new year).
@@ -152,7 +152,7 @@ def _cross_check_merged_dir(merged_dir: Path, year: int, expected: int) -> None:
             f"Permanent merged directory not found: {merged_dir}"
         )
 
-    pattern = re.compile(r'^(\d+)_' + re.escape(str(year)) + r'-\d{2}-\d{2}_')
+    pattern = re.compile(r'^'+re.escape(str(year)) +r'-(\d+)_' + re.escape(str(year)) + r'-\d{2}-\d{2}_')
     max_file_receipt = 0
     found_any = False
 
