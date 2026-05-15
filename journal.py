@@ -65,7 +65,7 @@ def generate_csv(
                 address = invoice.address if invoice else payment.address
 
             counterparty = f"{name}, {address}" if address else name
-            afa_str = "WAHR" if invoice and invoice.afa else "FALSCH"
+            afa_val = bool(invoice and invoice.afa)
             percentage_for_business = result.business_percentage
 
             # When position-level classification is active, only business positions
@@ -88,21 +88,21 @@ def generate_csv(
             if active_positions:
                 rates = {p.vat_rate for p in active_positions}
                 if len(rates) > 1:
-                    vat_str = mixed_vat_label
+                    vat_val = mixed_vat_label
                     vat_amount = sum(p.vat_amount for p in active_positions)
                     ig_str = ""
                 else:
                     rate = next(iter(rates))
-                    vat_str = f"{rate}%"
+                    vat_val = Decimal(rate) / Decimal(100)
                     vat_amount = sum(p.vat_amount for p in active_positions)
                     ig_str = str(ig_vat_rate) if _is_ig(invoice) else ""
             elif invoice and invoice.vat_rate is not None:
                 rate = invoice.vat_rate
-                vat_str = f"{rate}%"
+                vat_val = Decimal(rate) / Decimal(100)
                 vat_amount = (effective_base * Decimal(rate) / Decimal(100 + rate)).quantize(Decimal("0.01"))
                 ig_str = str(ig_vat_rate) if _is_ig(invoice) else ""
             else:
-                vat_str = "20%"
+                vat_val = Decimal(20) / Decimal(100)
                 vat_amount = (effective_base * Decimal(20) / Decimal(120)).quantize(Decimal("0.01"))
                 ig_str = ""
 
@@ -135,11 +135,11 @@ def generate_csv(
                 counterparty,                                       # recipient or paying party
                 "",                                                 # empty
                 "",                                                 # Weiterverkauf
-                afa_str,                                            # AfA
+                afa_val,                                            # AfA
                 _eur(gross * sign, sep),                            # amount incl. VAT
                 _eur(gross_anteilig * sign, sep),                   # amount incl. VAT (antlg.)
-                f"{percentage_for_business:g}%".replace(".", sep),  # Anteil
-                vat_str,                                            # VAT percent
+                pct,                                                # Anteil
+                vat_val,                                            # VAT percent
                 _eur(vat_amount * sign, sep),                       # VAT amount
                 _eur(vat_anteilig * sign, sep),                     # VAT amount (antlg.)
                 _eur(net * sign, sep),                              # net amount

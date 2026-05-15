@@ -4,6 +4,7 @@ import argparse
 import csv
 import shutil
 import sys
+import copy
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -28,26 +29,37 @@ def _parse_decimal_or_empty(s: str):
     return Decimal(s.replace(",", ".")) if s else None
 
 
+def _parse_bool(s: str) -> bool:
+    return s == "True"
+
+
+def _parse_decimal_or_text(s: str):
+    try:
+        return _parse_decimal(s)
+    except Exception:
+        return s
+
+
 _CONVERTERS = [
     int,                     # 1  year
-    str,                     # 2  receipt number ("034")
+    int,                     # 2  receipt number (34)
     str,                     # 3  category (Einnahmen / Ausgaben)
     str,                     # 4  detail category
     _parse_date,             # 5  booking date (DD.MM.YYYY)
     str,                     # 6  counterparty
     str,                     # 7  (empty)
     str,                     # 8  (empty / Weiterverkauf)
-    str,                     # 9  AfA (WAHR / FALSCH)
+    _parse_bool,             # 9  AfA (True / False)
     _parse_decimal,          # 10 gross amount
     _parse_decimal,          # 11 gross anteilig
-    str,                     # 12 Anteil %
-    str,                     # 13 VAT %
+    _parse_decimal,          # 12 Anteil (decimal fraction, e.g. 1.0 = 100%)
+    _parse_decimal_or_text,  # 13 VAT % (decimal fraction, or "gemischt" for mixed rates)
     _parse_decimal,          # 14 VAT amount
     _parse_decimal,          # 15 VAT amount antlg.
     _parse_decimal,          # 16 net amount
     _parse_decimal,          # 17 net antlg.
     _parse_date,             # 18 VAT deadline (DD.MM.YYYY)
-    str,                     # 19 IG
+    int,                     # 19 IG
     str,                     # 20 ESt Betrag (empty)
     _parse_decimal_or_empty, # 21 IG VAT antlg.
     str,                     # 22 invoice filename
@@ -214,7 +226,13 @@ def run(config: dict, workdir: Path) -> None:
             ws = _locate_sheet(wb, sheet_name)
 
             # Read number formats from last data row for format preservation
-            formats = [cell.number_format for cell in ws[last_data_row_num]]
+            formats = [(
+                cell.number_format,
+                copy.copy(cell.font),
+                copy.copy(cell.fill),
+                copy.copy(cell.border),
+                copy.copy(cell.alignment)
+                ) for cell in ws[last_data_row_num]]
 
             # Append rows at exact positions
             for i, row_values in enumerate(rows_to_append):
@@ -222,7 +240,7 @@ def run(config: dict, workdir: Path) -> None:
                 for col_num, value in enumerate(row_values, start=1):
                     cell = ws.cell(row=row_num, column=col_num, value=value)
                     if col_num <= len(formats):
-                        cell.number_format = formats[col_num - 1]
+                        cell.number_format, cell.font, cell.fill, cell.border, cell.alignment = formats[col_num - 1]
 
             wb.save(tmp_path)
         finally:

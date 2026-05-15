@@ -119,35 +119,35 @@ class TestVatSplit:
         result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=20))
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[12] == "20%"
+        assert row[12] == "0.2"
         assert row[18] == ""
 
     def test_ig_when_reverse_charge(self, tmp_path):
         result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, reverse_charge=True))
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[12] == "0%"
+        assert row[12] == "0"
         assert row[18] == "20"
 
     def test_no_ig_without_reverse_charge(self, tmp_path):
         result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=0, reverse_charge=False))
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[12] == "0%"
+        assert row[12] == "0"
         assert row[18] == ""
 
     def test_vat_defaults_to_20_without_invoice(self, tmp_path):
         result = MatchResult(payment=_payment("120.00"), invoice=None)
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[12] == "20%"
+        assert row[12] == "0.2"
         assert row[18] == ""
 
     def test_vat_defaults_to_20_when_rate_unknown(self, tmp_path):
         result = MatchResult(payment=_payment("120.00"), invoice=_invoice(vat_rate=None))
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[12] == "20%"
+        assert row[12] == "0.2"
         assert row[18] == ""
 
     def test_outgoing_is_ausgaben(self, tmp_path):
@@ -193,20 +193,20 @@ class TestVatSplit:
 
 
 class TestAfa:
-    def test_afa_true_writes_wahr(self, tmp_path):
+    def test_afa_true_writes_true(self, tmp_path):
         result = MatchResult(payment=_payment("1200.00"), invoice=_invoice(afa=True))
         generate_csv([result], tmp_path / "journal.csv")
-        assert _read_csv(tmp_path / "journal.csv")[0][8] == "WAHR"
+        assert _read_csv(tmp_path / "journal.csv")[0][8] == "True"
 
-    def test_afa_false_writes_falsch(self, tmp_path):
+    def test_afa_false_writes_false(self, tmp_path):
         result = MatchResult(payment=_payment("120.00"), invoice=_invoice(afa=False))
         generate_csv([result], tmp_path / "journal.csv")
-        assert _read_csv(tmp_path / "journal.csv")[0][8] == "FALSCH"
+        assert _read_csv(tmp_path / "journal.csv")[0][8] == "False"
 
-    def test_no_invoice_writes_falsch(self, tmp_path):
+    def test_no_invoice_writes_false(self, tmp_path):
         result = MatchResult(payment=_payment("120.00"), invoice=None)
         generate_csv([result], tmp_path / "journal.csv")
-        assert _read_csv(tmp_path / "journal.csv")[0][8] == "FALSCH"
+        assert _read_csv(tmp_path / "journal.csv")[0][8] == "False"
 
 
 class TestDetailCategory:
@@ -275,7 +275,7 @@ class TestMixedVat:
         result = MatchResult(payment=_payment("120.00"), invoice=_invoice(positions=positions))
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[12] == "20%"
+        assert row[12] == "0.2"
         assert row[13] == "20,00"   # VAT amount from position
 
     def test_mixed_rates_label_default(self, tmp_path):
@@ -385,7 +385,7 @@ class TestPositionClassification:
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[9] == "120,00"   # business gross only
-        assert row[12] == "20%"     # single rate from business positions
+        assert row[12] == "0.2"     # single rate from business positions
 
     def test_anteil_unchanged_by_classification(self, tmp_path):
         # business_percentage lives on MatchResult, independent of position split
@@ -393,7 +393,7 @@ class TestPositionClassification:
         result = MatchResult(payment=_payment("100.00"), invoice=inv, business_percentage=9.22)
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[11] == "9,22%"
+        assert row[11] == "0.0922"
 
     def test_no_private_positions_uses_payment_amount(self, tmp_path):
         # All positions business → gross = payment.amount as before
@@ -418,14 +418,14 @@ class TestDecimalSeparator:
         result = MatchResult(payment=_payment("120.00"), invoice=_invoice(), business_percentage=9.22)
         generate_csv([result], tmp_path / "journal.csv", decimal_separator=".")
         row = _read_csv(tmp_path / "journal.csv")[0]
-        assert row[11] == "9.22%"
+        assert row[11] == "0.0922"
 
     def test_comma_separator_default(self, tmp_path):
         result = MatchResult(payment=_payment("1234.56"), invoice=_invoice(vat_rate=20), business_percentage=9.22)
         generate_csv([result], tmp_path / "journal.csv")
         row = _read_csv(tmp_path / "journal.csv")[0]
         assert row[9] == "1234,56"
-        assert row[11] == "9,22%"
+        assert row[11] == "0.0922"
 
 
 class TestComputedFields:

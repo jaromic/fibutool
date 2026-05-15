@@ -51,8 +51,8 @@ def _minimal_csv_row(year=2026, receipt="034", category="Einnahmen", gross="1993
     """Return a 23-column CSV row matching journal.py's output format."""
     return [
         str(year), receipt, category, "Waren-/Leistungserlöse",
-        booking, "Test GmbH", "", "", "FALSCH",
-        gross, gross, "100%", "20%",
+        booking, "Test GmbH", "", "", "False",
+        gross, gross, "1.0", "0.2",
         "332,30", "332,30", "1661,50", "1661,50",
         deadline, "", "", "", "invoice.pdf", "payment.pdf",
     ]
@@ -180,7 +180,7 @@ class TestRunHappyPath:
         # header + 1 existing + 1 new = 3 rows
         assert len(rows) == 3
         # receipt number in column 2 (index 1) of the new row
-        assert str(rows[2][1]) == "034"
+        assert rows[2][1] == 34
 
     def test_multiple_rows_appended(self, tmp_path):
         wb_path = _make_workbook(tmp_path, [(2026, "033", "Einnahmen", "01.04.2026", "100,00")])
@@ -194,7 +194,7 @@ class TestRunHappyPath:
         ws = wb[SHEET]
         rows = list(ws.iter_rows(values_only=True))
         assert len(rows) == 4
-        assert str(rows[3][1]) == "035"
+        assert rows[3][1] == 35
 
     def test_existing_rows_untouched(self, tmp_path):
         original_row = (2026, "033", "Einnahmen", "01.04.2026", "100,00")
