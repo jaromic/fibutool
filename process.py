@@ -230,6 +230,10 @@ def _full_mode(
         print(f"fibutool: no PDF files found in {payments_dir}", file=sys.stderr)
         sys.exit(1)
 
+    if not invoice_pdfs:
+        print(f"fibutool: no PDF files found in {invoices_dir}", file=sys.stderr)
+        sys.exit(1)
+
     # Step 1: Extract + order payments
     print(f"Step 1: Extracting {len(payment_pdfs)} payment(s)...")
     payments = []

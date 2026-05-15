@@ -7,6 +7,30 @@ from pathlib import Path
 import openpyxl
 
 
+def _open_workbook(path: Path, *, read_only: bool = True, keep_vba: bool = False) -> openpyxl.Workbook:
+    """Open an openpyxl workbook for read or write access."""
+    return openpyxl.load_workbook(path, data_only=True, read_only=read_only, keep_vba=keep_vba)
+
+
+def _locate_sheet(wb: openpyxl.Workbook, sheet_name: str):
+    """Return the named worksheet or raise ValueError."""
+    if sheet_name not in wb.sheetnames:
+        raise ValueError(
+            f"Sheet '{sheet_name}' not found in workbook "
+            f"(available: {wb.sheetnames})"
+        )
+    return wb[sheet_name]
+
+
+def _find_last_data_row(ws) -> int:
+    """Return 1-based row number of the last row with any non-None value. Returns 0 if empty."""
+    last = 0
+    for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if any(cell is not None for cell in row):
+            last = i
+    return last
+
+
 def read_journal_state(config: dict) -> tuple[int, date]:
     """Read last receipt number and latest payment date from the configured Excel journal.
 
@@ -29,14 +53,10 @@ def read_journal_state(config: dict) -> tuple[int, date]:
     if not wb_path.exists():
         raise FileNotFoundError(f"Journal workbook not found: {wb_path}")
 
-    wb = openpyxl.load_workbook(wb_path, data_only=True, read_only=True)
+    wb = _open_workbook(wb_path, read_only=True)
     try:
-        if sheet_name not in wb.sheetnames:
-            raise ValueError(
-                f"Sheet '{sheet_name}' not found in {wb_path.name} "
-                f"(available: {wb.sheetnames})"
-            )
-        rows = list(wb[sheet_name].iter_rows(values_only=True))
+        ws = _locate_sheet(wb, sheet_name)
+        rows = list(ws.iter_rows(values_only=True))
     finally:
         wb.close()
 

@@ -30,8 +30,8 @@ fetcher          = "fetcher:main"       # acquisition layer only
 [tool.setuptools]
 # Flat layout: all modules are top-level .py files, no package subdirectory.
 py-modules = [
-    "api", "cache", "extractor", "fetcher", "journal", "journal_reader",
-    "matcher", "merger", "models", "orderer", "overview", "process", "run", "splitter",
+    "api", "cache", "extractor", "fetcher", "journal", "journal_reader", "journal_updater",
+    "matcher", "merger", "models", "orderer", "overview", "process", "run", "shared", "splitter",
 ]
 
 [tool.setuptools_scm]
@@ -40,3 +40,8 @@ py-modules = [
 #   git tag v1.0.0
 #   git push origin v1.0.0
 #   pip install -e .        ← reinstall so fibutool --version reflects the new tag
+
+[tool.pytest.ini_options]
+filterwarnings = [
+  "ignore::pytest.PytestUnraisableExceptionWarning",
+]

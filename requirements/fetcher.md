@@ -177,6 +177,8 @@ One pass per configured filesystem source.
 - `--only <label>`: process only the named source.
 - `--dry-run`: report without downloading.
 
+**Clean mode (orchestrated by `run.py`):** When `run.py` is invoked with `--clean`, it deletes `fetcher_seen.json` from the work directory before running the fetcher. This forces re-download of all files regardless of prior seen-registry state. The fetcher itself has no `--clean` flag.
+
 **Per-source config key:**
 - `since_days` *(required unless `--since-days` is passed)*: integer number of days to look back from today. Each source type uses this to derive its cutoff date: email sources filter by message date; filesystem sources filter by file mtime.
 

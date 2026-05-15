@@ -84,6 +84,7 @@ def _run_stage(label: str, cmd: list[str]) -> bool:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding='utf-8',
         bufsize=1,
     ) as proc:
         for line in proc.stdout:
@@ -159,6 +160,11 @@ def main() -> None:
             break
 
     # ── Stage 3: fetcher ──────────────────────────────────────────────────────
+    if args.clean:
+        seen_registry_path=workdir / "fetcher_seen.json"
+        print(f"  removing {seen_registry_path}")
+        seen_registry_path.unlink(missing_ok=True)
+
     fetcher_cmd = fetcher_cmd_base
     while True:
         if _run_stage("fetcher — downloading invoices", fetcher_cmd):
@@ -183,6 +189,19 @@ def main() -> None:
         if _run_stage("fibutool — processing session", fibutool_cmd):
             break
         choice = _prompt_arc("fibutool")
+        if choice == "abort":
+            sys.exit(1)
+        elif choice == "continue":
+            break
+        # retry: loop
+
+    # ── Stage 5: journal updater ──────────────────────────────────────────────
+    updater_cmd = [sys.executable, str(here / "journal_updater.py"),
+                   "--workdir", str(workdir), "--config", str(config_path)]
+    while True:
+        if _run_stage("journal updater — appending entries to Excel workbook", updater_cmd):
+            break
+        choice = _prompt_arc("journal updater")
         if choice == "abort":
             sys.exit(1)
         elif choice == "continue":

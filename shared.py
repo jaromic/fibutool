@@ -33,6 +33,13 @@ def setup_logging(workdir: Path, prefix: str) -> None:
     """
     ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     log_path = workdir / f"{ts}_{prefix}.log"
+
+    # force utf-8 encoding, as fallback convert unicode characters to backslash encoded entities:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+
     try:
         log_file = open(log_path, "w", encoding="utf-8")
         sys.stdout = Tee(sys.__stdout__, log_file)
