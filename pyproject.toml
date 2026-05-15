@@ -27,6 +27,9 @@ fibutool         = "run:main"           # orchestrator — normal entry point
 fibutool-process = "process:main"       # processing layer only
 fetcher          = "fetcher:main"       # acquisition layer only
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov", "setuptools-scm>=8.0"]
+
 [tool.setuptools]
 # Flat layout: all modules are top-level .py files, no package subdirectory.
 py-modules = [

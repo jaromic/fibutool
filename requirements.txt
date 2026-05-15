@@ -10,4 +10,5 @@ keyring>=24.0
 
 # dev / build
 pytest>=8.0
+pytest-cov
 setuptools-scm>=8.0

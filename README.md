@@ -160,7 +160,7 @@ Every tool writes a timestamped log file to the work directory.
 <work directory>/               ← per-session; default: current directory
   payments/                     ← input: bank payment confirmation PDFs (placed manually)
   invoices/                     ← input: invoice PDFs (fetched automatically or placed manually)
-  payments-ordered/             ← output: payments renamed NNN_YYYY-MM-DD_<orig>.pdf
+  payments-ordered/             ← output: payments renamed YYYY-NNN_YYYY-MM-DD_<orig>.pdf
   merged/                       ← output: merged PDFs (invoice pages first, then payment)
   journal.csv                   ← output: journal rows ready for import into Excel
   match_results.json            ← intermediary: extracted + matched data; required for --journal-only and resume mode
@@ -215,6 +215,11 @@ For `fetcher` sources (`gmail_sources`, `filesystem_sources`) and `original_jour
 
 ## Development environment
 
+Enable pre-commit hook in your local repo:
+```
+git config core.hooksPath .githooks
+```
+
 This project is developed inside a Docker container (Python 3.12 + Node.js + Claude Code CLI). The container is only needed for running the autonomous Claude Code agent safely; the tool itself runs on Windows natively.
 
 **Build and start the dev container (run from the repo root on the host):**
@@ -242,6 +247,19 @@ pip install -e .
 
 ```bash
 pytest tests/
+```
+
+**One-time developer setup (git hook — runs unit tests before every commit):**
+
+```bash
+git config core.hooksPath .githooks
+```
+
+On Windows (outside the container), also install dev dependencies:
+
+```bat
+pip install -e ".[dev]"
+git config core.hooksPath .githooks
 ```
 
 ## Splitter (test-data helper)
