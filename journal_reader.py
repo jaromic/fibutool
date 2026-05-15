@@ -7,9 +7,9 @@ from pathlib import Path
 import openpyxl
 
 
-def _open_workbook(path: Path, *, read_only: bool = True, keep_vba: bool = False) -> openpyxl.Workbook:
+def _open_workbook(path: Path, *, read_only: bool = True, keep_vba: bool = False, data_only: bool = True) -> openpyxl.Workbook:
     """Open an openpyxl workbook for read or write access."""
-    return openpyxl.load_workbook(path, data_only=True, read_only=read_only, keep_vba=keep_vba)
+    return openpyxl.load_workbook(path, data_only=data_only, read_only=read_only, keep_vba=keep_vba)
 
 
 def _locate_sheet(wb: openpyxl.Workbook, sheet_name: str):
