@@ -124,7 +124,7 @@ One pass per configured Gmail source.
 - **F1.3** Apply sender and subject filters; a message must satisfy at least one sender match AND at least one subject keyword match (if both lists are non-empty). If a filter list is omitted, all values are accepted for that criterion.
 - **F1.4** For each matching message: collect all PDF attachments.
 - **F1.5** Skip any attachment whose canonical key (`<source label>/<gmail message-id>/<attachment filename>`) is already in the seen registry.
-- **F1.6** Save new PDFs to `invoices/` using the original attachment filename; append a numeric suffix before the extension if a filename collision occurs (`Rechnung_2.pdf`).
+- **F1.6** Save new PDFs to `invoices/` with `_fetched` appended to the stem (e.g. `Rechnung_fetched.pdf`) to distinguish automatically fetched files from manually placed ones. If a filename collision occurs and the existing file has different content, append a numeric counter before the extension (`Rechnung_fetched_2.pdf`). If the existing file has identical content (SHA-256), skip the write silently.
 - **F1.7** Record the canonical key in the seen registry after a successful save.
 - **F1.8** Access mailboxes read-only. Do not modify messages, labels, or read status.
 
@@ -139,7 +139,7 @@ One pass per configured IMAP source.
 - **F2.3** Apply sender and subject filters client-side: a message must satisfy at least one sender match AND at least one subject keyword match (if both lists are non-empty). If a filter list is omitted, all values are accepted for that criterion.
 - **F2.4** For each matching message: parse the raw message bytes (RFC 2822) and collect all PDF attachments (content type `application/pdf` or filename ending `.pdf`).
 - **F2.5** Skip any attachment whose canonical key (`<source label>/<Message-ID header>/<filename>`) is already in the seen registry.
-- **F2.6** Save new PDFs to `invoices/` using the original attachment filename; append a numeric suffix before the extension if a filename collision occurs.
+- **F2.6** Save new PDFs to `invoices/` with `_fetched` appended to the stem (e.g. `invoice_fetched.pdf`). If a filename collision occurs and the existing file has different content, append a numeric counter (`invoice_fetched_2.pdf`). If the existing file has identical content (SHA-256), skip the write silently.
 - **F2.7** Record the canonical key in the seen registry after a successful save.
 - **F2.8** Access mailboxes read-only (`EXAMINE` / `readonly=True`). Do not modify messages, flags, or read status.
 - **F2.9** Call `LOGOUT` on the connection when done, even if an error occurred.
@@ -156,7 +156,7 @@ One pass per configured filesystem source.
 - **F3.4** Skip files whose mtime is before the since date (derived from the source's `since_days`).
 - **F3.5** For each candidate: compute the SHA-256 hash of the file contents. The canonical key is `local_fs/<sha256>`.
 - **F3.6** Skip any file whose canonical key is already in the seen registry.
-- **F3.7** Copy new files to `invoices/` using the original filename; append a numeric suffix before the extension if a filename collision occurs.
+- **F3.7** Copy new files to `invoices/` with `_fetched` appended to the stem (e.g. `invoice_fetched.pdf`). If a filename collision occurs and the existing file has different content, append a numeric counter (`invoice_fetched_2.pdf`). If the existing file has identical SHA-256, skip the copy silently (cross-source duplicate guard in addition to the seen registry).
 - **F3.8** Record the canonical key in the seen registry after a successful copy.
 - **F3.9** Do not modify, move, or delete the source files.
 
@@ -196,7 +196,7 @@ One pass per configured filesystem source.
 ## Known gaps
 
 **G1 — Attachment filename collisions**
-If two sources deliver a file named `Rechnung.pdf`, the second file is saved as `Rechnung_2.pdf`. The numeric suffix may be non-descriptive but is unambiguous and keeps the original name intact for the common case.
+If two sources deliver files named `Rechnung.pdf` with different content, the second is saved as `Rechnung_fetched_2.pdf`. The numeric counter is unambiguous but non-descriptive. Files with identical content (same SHA-256) are silently deduplicated regardless of source.
 
 ---
 

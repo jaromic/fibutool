@@ -166,9 +166,12 @@ def main() -> None:
 
     # ── Stage 3: fetcher ──────────────────────────────────────────────────────
     if args.clean:
-        seen_registry_path=workdir / "fetcher_seen.json"
+        seen_registry_path = workdir / "fetcher_seen.json"
         print(f"  removing {seen_registry_path}")
         seen_registry_path.unlink(missing_ok=True)
+        for f in (workdir / "invoices").glob("*_fetched*.pdf", case_sensitive=False):
+            print(f"  removing {f.name}")
+            f.unlink(missing_ok=True)
 
     fetcher_cmd = fetcher_cmd_base
     if last_payment_date:

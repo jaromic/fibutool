@@ -201,18 +201,29 @@ def _matches_filters(
     return True
 
 
-def _safe_filename(invoices_dir: Path, name: str) -> Path:
-    """Return a collision-free path in invoices_dir for the given filename."""
+def _fetched_name(filename: str) -> str:
+    """Append _fetched before the extension so fetched files are identifiable."""
+    p = Path(filename)
+    return f"{p.stem}_fetched{p.suffix}"
+
+
+def _safe_filename(invoices_dir: Path, name: str, content: bytes) -> Path | None:
+    """Return a collision-free path in invoices_dir for the given filename and content.
+
+    Returns None if identical content already exists under any candidate path
+    (duplicate — caller should skip the save).
+    """
     stem = Path(name).stem
     suffix = Path(name).suffix or ".pdf"
-    candidate = invoices_dir / name
-    if not candidate.exists():
-        return candidate
+    content_hash = hashlib.sha256(content).digest()
     counter = 2
+    candidate = invoices_dir / name
     while True:
-        candidate = invoices_dir / f"{stem}_{counter}{suffix}"
         if not candidate.exists():
             return candidate
+        if hashlib.sha256(candidate.read_bytes()).digest() == content_hash:
+            return None  # identical content already saved
+        candidate = invoices_dir / f"{stem}_{counter}{suffix}"
         counter += 1
 
 
@@ -405,7 +416,10 @@ def _process_gmail_source(
                     continue
 
                 pdf_bytes = base64.urlsafe_b64decode(raw_data + "==")
-                out_path = _safe_filename(invoices_dir, filename)
+                out_path = _safe_filename(invoices_dir, _fetched_name(filename), pdf_bytes)
+                if out_path is None:
+                    print(f"  skipped (duplicate): {filename}")
+                    continue
                 out_path.write_bytes(pdf_bytes)
                 seen.add(canonical_key)
                 saved_files.append(out_path.name)
@@ -464,8 +478,12 @@ def _process_filesystem_source(
             saved_files.append(src_file.name)
             continue
 
-        out_path = _safe_filename(invoices_dir, src_file.name)
-        shutil.copy2(src_file, out_path)
+        file_bytes = src_file.read_bytes()
+        out_path = _safe_filename(invoices_dir, _fetched_name(src_file.name), file_bytes)
+        if out_path is None:
+            print(f"  skipped (duplicate): {src_file.name}")
+            continue
+        out_path.write_bytes(file_bytes)
         seen.add(canonical_key)
         saved_files.append(out_path.name)
         print(f"  saved: {out_path.name}")
@@ -577,7 +595,10 @@ def _process_imap_source(
                         saved_files.append(filename)
                         continue
 
-                    out_path = _safe_filename(invoices_dir, filename)
+                    out_path = _safe_filename(invoices_dir, _fetched_name(filename), pdf_bytes)
+                    if out_path is None:
+                        print(f"  skipped (duplicate): {filename}  (from: {from_header})")
+                        continue
                     out_path.write_bytes(pdf_bytes)
                     seen.add(canonical_key)
                     saved_files.append(out_path.name)

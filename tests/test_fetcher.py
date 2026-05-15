@@ -15,6 +15,7 @@ import pytest
 from fetcher import (
     SeenRegistry,
     _authenticate_imap,
+    _fetched_name,
     _find_pdf_parts,
     _imap_date,
     _imap_pdf_attachments,
@@ -74,23 +75,43 @@ class TestSeenRegistry:
 
 # ── _safe_filename ────────────────────────────────────────────────────────────
 
+class TestFetchedName:
+    def test_adds_fetched_suffix(self):
+        assert _fetched_name("invoice.pdf") == "invoice_fetched.pdf"
+
+    def test_preserves_extension_case(self):
+        assert _fetched_name("doc.PDF") == "doc_fetched.PDF"
+
+    def test_no_extension(self):
+        assert _fetched_name("invoice") == "invoice_fetched"
+
+
 class TestSafeFilename:
     def test_no_collision(self, tmp_path):
-        assert _safe_filename(tmp_path, "invoice.pdf") == tmp_path / "invoice.pdf"
+        assert _safe_filename(tmp_path, "invoice.pdf", b"data") == tmp_path / "invoice.pdf"
 
-    def test_one_collision(self, tmp_path):
+    def test_one_collision_different_content(self, tmp_path):
         (tmp_path / "invoice.pdf").write_bytes(b"x")
-        assert _safe_filename(tmp_path, "invoice.pdf") == tmp_path / "invoice_2.pdf"
+        assert _safe_filename(tmp_path, "invoice.pdf", b"y") == tmp_path / "invoice_2.pdf"
 
-    def test_multiple_collisions(self, tmp_path):
+    def test_multiple_collisions_different_content(self, tmp_path):
         (tmp_path / "invoice.pdf").write_bytes(b"x")
-        (tmp_path / "invoice_2.pdf").write_bytes(b"x")
-        assert _safe_filename(tmp_path, "invoice.pdf") == tmp_path / "invoice_3.pdf"
+        (tmp_path / "invoice_2.pdf").write_bytes(b"y")
+        assert _safe_filename(tmp_path, "invoice.pdf", b"z") == tmp_path / "invoice_3.pdf"
 
     def test_preserves_suffix(self, tmp_path):
         (tmp_path / "doc.PDF").write_bytes(b"x")
-        result = _safe_filename(tmp_path, "other.PDF")
+        result = _safe_filename(tmp_path, "other.PDF", b"y")
         assert result.suffix == ".PDF"
+
+    def test_duplicate_content_returns_none(self, tmp_path):
+        (tmp_path / "invoice.pdf").write_bytes(b"same")
+        assert _safe_filename(tmp_path, "invoice.pdf", b"same") is None
+
+    def test_duplicate_content_under_numbered_name_returns_none(self, tmp_path):
+        (tmp_path / "invoice.pdf").write_bytes(b"x")
+        (tmp_path / "invoice_2.pdf").write_bytes(b"same")
+        assert _safe_filename(tmp_path, "invoice.pdf", b"same") is None
 
 
 # ── _matches_filters ──────────────────────────────────────────────────────────
@@ -285,8 +306,8 @@ class TestProcessGmailSource:
                 _make_source(tmp_path), date(2026, 1, 1), invoices_dir, seen, dry_run=False
             )
 
-        assert saved == ["invoice.pdf"]
-        assert (invoices_dir / "invoice.pdf").read_bytes() == PDF_BYTES
+        assert saved == ["invoice_fetched.pdf"]
+        assert (invoices_dir / "invoice_fetched.pdf").read_bytes() == PDF_BYTES
         assert seen.contains("test/msg1/invoice.pdf")
         assert warnings == []
 
@@ -378,7 +399,7 @@ class TestProcessGmailSource:
     def test_filename_collision_appends_counter(self, tmp_path):
         invoices_dir = tmp_path / "invoices"
         invoices_dir.mkdir()
-        (invoices_dir / "invoice.pdf").write_bytes(b"existing")
+        (invoices_dir / "invoice_fetched.pdf").write_bytes(b"existing")
         seen = SeenRegistry(tmp_path / "seen.json")
 
         service = _make_service(
@@ -397,8 +418,8 @@ class TestProcessGmailSource:
                 _make_source(tmp_path), date(2026, 1, 1), invoices_dir, seen, dry_run=False
             )
 
-        assert saved == ["invoice_2.pdf"]
-        assert (invoices_dir / "invoice_2.pdf").read_bytes() == PDF_BYTES
+        assert saved == ["invoice_fetched_2.pdf"]
+        assert (invoices_dir / "invoice_fetched_2.pdf").read_bytes() == PDF_BYTES
 
     def test_auth_failure_returns_warning(self, tmp_path):
         invoices_dir = tmp_path / "invoices"
@@ -476,8 +497,8 @@ class TestProcessFilesystemSource:
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
-        assert saved == ["invoice.pdf"]
-        assert (invoices_dir / "invoice.pdf").read_bytes() == PDF_BYTES
+        assert saved == ["invoice_fetched.pdf"]
+        assert (invoices_dir / "invoice_fetched.pdf").read_bytes() == PDF_BYTES
         assert warnings == []
 
     def test_canonical_key_is_content_hash(self, tmp_path):
@@ -567,7 +588,7 @@ class TestProcessFilesystemSource:
         _write_pdf(src / "invoice.pdf")
         invoices_dir = tmp_path / "invoices"
         invoices_dir.mkdir()
-        (invoices_dir / "invoice.pdf").write_bytes(b"existing")
+        (invoices_dir / "invoice_fetched.pdf").write_bytes(b"existing")
         seen = SeenRegistry(tmp_path / "seen.json")
 
         saved, _ = _process_filesystem_source(
@@ -575,8 +596,8 @@ class TestProcessFilesystemSource:
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
-        assert saved == ["invoice_2.pdf"]
-        assert (invoices_dir / "invoice_2.pdf").read_bytes() == PDF_BYTES
+        assert saved == ["invoice_fetched_2.pdf"]
+        assert (invoices_dir / "invoice_fetched_2.pdf").read_bytes() == PDF_BYTES
 
     def test_filters_by_filename_pattern(self, tmp_path):
         src = tmp_path / "src"
@@ -592,7 +613,7 @@ class TestProcessFilesystemSource:
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
-        assert saved == ["invoice.pdf"]
+        assert saved == ["invoice_fetched.pdf"]
 
     def test_recursive_walks_subdirectories(self, tmp_path):
         src = tmp_path / "src"
@@ -608,7 +629,7 @@ class TestProcessFilesystemSource:
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
-        assert saved == ["deep_invoice.pdf"]
+        assert saved == ["deep_invoice_fetched.pdf"]
 
     def test_non_recursive_ignores_subdirectories(self, tmp_path):
         src = tmp_path / "src"
@@ -665,7 +686,7 @@ class TestProcessFilesystemSource:
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
-        assert saved == ["new_invoice.pdf"]
+        assert saved == ["new_invoice_fetched.pdf"]
 
     def test_custom_filename_patterns(self, tmp_path):
         src = tmp_path / "src"
@@ -681,7 +702,7 @@ class TestProcessFilesystemSource:
             date(2026, 1, 1), invoices_dir, seen, dry_run=False,
         )
 
-        assert saved == ["Rechnung_001.pdf"]
+        assert saved == ["Rechnung_001_fetched.pdf"]
 
 
 # ── anchor-date since calculation ────────────────────────────────────────────
@@ -719,7 +740,7 @@ class TestAnchorDateSince:
         saved_with_anchor, _ = _process_filesystem_source(
             _make_fs_source(src), since_with_anchor, invoices_dir, seen, dry_run=False,
         )
-        assert saved_with_anchor == ["old_invoice.pdf"], "file should be included when anchored to last payment date"
+        assert saved_with_anchor == ["old_invoice_fetched.pdf"], "file should be included when anchored to last payment date"
 
     def test_anchor_date_parsed_from_iso_string(self):
         from fetcher import build_parser
@@ -966,8 +987,8 @@ class TestProcessImapSource:
                 _make_imap_source_cfg(), date(2026, 1, 1), invoices_dir, seen, dry_run=False
             )
 
-        assert saved == ["invoice.pdf"]
-        assert (invoices_dir / "invoice.pdf").read_bytes() == PDF_BYTES
+        assert saved == ["invoice_fetched.pdf"]
+        assert (invoices_dir / "invoice_fetched.pdf").read_bytes() == PDF_BYTES
         assert seen.contains("mail/<msg1@example.com>/invoice.pdf")
         assert warnings == []
 
