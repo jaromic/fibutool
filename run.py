@@ -45,17 +45,17 @@ def _parse_args() -> argparse.Namespace:
 def _prompt_manual_journal_state() -> int:
     """Prompt the user to enter receipt number manually.
 
-    Returns receipt_number. Aborts the process on Ctrl+C, reprompts on invalid receipt number.
+    Returns last_receipt_number. Aborts the process on Ctrl+C, reprompts on invalid receipt number.
     """
-    receipt_number: int | None = None
-    while receipt_number is None:
+    last_receipt_number: int | None = None
+    while last_receipt_number is None:
         try:
-            receipt_number = int(input("  Enter last receipt number manually: ").strip())
+            last_receipt_number = int(input("  Enter last receipt number manually: ").strip())
         except KeyboardInterrupt:
             print("\nAborted.", file=sys.stderr)
             sys.exit(1)
         except ValueError:
-            print("  Invalid receipt number — please enter an integer.")
+            print("  Invalid last receipt number — please enter an integer.")
 
 
 def _prompt_arc(stage: str) -> str:
@@ -118,7 +118,7 @@ def main() -> None:
     # ── Stage 1: read journal ─────────────────────────────────────────────────
     from journal_reader import read_journal_state
 
-    receipt_number: int | None = None
+    last_receipt_number: int | None = None
     last_payment_date: date | None = None
 
     while True:
@@ -130,7 +130,7 @@ def main() -> None:
             print(f"  Latest payment date: {last_payment_date}")
             print(f"\n  Latest 5 journal entries:\n")
             for (year, receipt_number, payment_date, description, amount) in entries[-5:]:
-                print(f"   {year:03d}-{receipt_number}  {payment_date}  {amount: 7.2f}  {description}")
+                print(f"   {year}-{receipt_number:03d}  {payment_date}  {amount: 7.2f}  {description}")
             break
         except Exception as e:
             print(f"\njournal_reader error: {e}", file=sys.stderr)
@@ -140,7 +140,7 @@ def main() -> None:
             elif choice == "retry":
                 continue
             else:  # continue — fall back to manual entry
-                receipt_number = _prompt_manual_journal_state()
+                last_receipt_number = _prompt_manual_journal_state()
                 break
 
     # ── Stage 2: user downloads payment receipts ──────────────────────────────
@@ -188,7 +188,7 @@ def main() -> None:
         print("\nResuming from existing match_results.json  (run with --clean to start fresh)")
         fibutool_cmd = fibutool_cmd_base
     else:
-        fibutool_cmd = fibutool_cmd_base + ["-n", str(receipt_number)]
+        fibutool_cmd = fibutool_cmd_base + ["-n", str(last_receipt_number)]
         if args.clean:
             fibutool_cmd += ["--clean"]
     while True:

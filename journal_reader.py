@@ -34,7 +34,7 @@ def _find_last_data_row(ws) -> int:
 def read_journal_state(config: dict) -> tuple[list, int, int, date]:
     """Read last receipt number and latest payment date from the configured Excel journal.
 
-    Returns (last_receipt_number, latest_payment_date).
+    Returns (entries, last_year, last_receipt_number, latest_payment_date).
 
     Raises ValueError for any data inconsistency.
     Raises FileNotFoundError if the workbook or permanent_merged_dir is missing.
