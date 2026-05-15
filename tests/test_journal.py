@@ -186,10 +186,10 @@ class TestVatSplit:
         generate_csv([result], tmp_path / "journal.csv")
         assert _read_csv(tmp_path / "journal.csv")[0][2] == "Ausgaben"
 
-    def test_receipt_number_formatted(self, tmp_path):
+    def test_receipt_number_written_as_plain_integer(self, tmp_path):
         result = MatchResult(payment=_payment("120.00", receipt_number=7), invoice=_invoice())
         generate_csv([result], tmp_path / "journal.csv")
-        assert _read_csv(tmp_path / "journal.csv")[0][1] == "007"
+        assert _read_csv(tmp_path / "journal.csv")[0][1] == "7"
 
 
 class TestAfa:

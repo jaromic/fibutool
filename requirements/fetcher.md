@@ -171,7 +171,8 @@ One pass per configured filesystem source.
 | **Dry run** | `--dry-run` | List what would be downloaded; do not write files or update registry |
 
 **Flags:**
-- `--since-days N` *(optional)*: override the per-source `since_days` for all sources — look back N days from today. Intended for manual one-off runs; when omitted, each source uses its configured `since_days`.
+- `--since-days N` *(optional)*: override the per-source `since_days` for all sources — look back N days from the anchor date. Intended for manual one-off runs; when omitted, each source uses its configured `since_days`.
+- `--anchor-date DATE` *(optional, ISO format YYYY-MM-DD)*: anchor point for `since_days` calculation. When provided, `since = anchor_date - since_days`. When omitted, defaults to today. `run.py` passes the latest payment date from the journal as the anchor so that invoices are not missed when runs are spaced further apart than `since_days`.
 - `--workdir <path>`: work directory (default: current directory).
 - `--config <path>`: config file override.
 - `--only <label>`: process only the named source.

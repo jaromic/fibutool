@@ -128,7 +128,7 @@ def generate_csv(
 
             writer.writerow([
                 payment.booking_date.year,                          # year
-                f"{payment.receipt_number:03d}",                    # receipt number
+                payment.receipt_number,                             # receipt number
                 category,                                           # Einnahmen / Ausgaben
                 detail_category,                                    # sub-category
                 payment.booking_date.strftime("%d.%m.%Y"),         # booking date

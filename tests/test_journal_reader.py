@@ -58,8 +58,9 @@ class TestReadJournalState:
             (2026, 41, date(2026, 3, 1)),
             (2026, 42, date(2026, 4, 15)),
         ])
-        receipt, pdate = read_journal_state(_make_config(wb, merged))
+        year, receipt, pdate = read_journal_state(_make_config(wb, merged))
 
+        assert year == 2026
         assert receipt == 42
         assert pdate == date(2026, 4, 15)
 
@@ -73,8 +74,9 @@ class TestReadJournalState:
             (2026, 3, date(2026, 2, 1)),
             (2026, 5, date(2026, 4, 20)),
         ])
-        receipt, pdate = read_journal_state(_make_config(wb, merged))
+        year, receipt, pdate = read_journal_state(_make_config(wb, merged))
 
+        assert year == 2026
         assert receipt == 5
         assert pdate == date(2026, 4, 20)
 
@@ -92,7 +94,8 @@ class TestReadJournalState:
         path = tmp_path / "journal.xlsx"
         wb.save(path)
 
-        receipt, pdate = read_journal_state(_make_config(path, merged))
+        year, receipt, pdate = read_journal_state(_make_config(path, merged))
+        assert year == 2026
         assert receipt == 1
         assert pdate == date(2026, 3, 10)
 
@@ -106,7 +109,8 @@ class TestReadJournalState:
             (2026, None, date(2026, 1, 1)),
             (2026, 2, date(2026, 4, 1)),
         ])
-        receipt, _ = read_journal_state(_make_config(wb, merged))
+        year, receipt, _ = read_journal_state(_make_config(wb, merged))
+        assert year == 2026
         assert receipt == 2
 
     def test_no_original_journal_config_raises(self, tmp_path):
@@ -164,7 +168,8 @@ class TestReadJournalState:
             (2025, 50, date(2025, 11, 1)),
             (2026, 3,  date(2026, 5, 1)),
         ])
-        receipt, pdate = read_journal_state(_make_config(wb, merged))
+        year, receipt, pdate = read_journal_state(_make_config(wb, merged))
+        assert year == 2026
         assert receipt == 3
         assert pdate == date(2026, 5, 1)
 

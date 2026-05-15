@@ -31,7 +31,7 @@ def _find_last_data_row(ws) -> int:
     return last
 
 
-def read_journal_state(config: dict) -> tuple[int, date]:
+def read_journal_state(config: dict) -> tuple[int, int, date]:
     """Read last receipt number and latest payment date from the configured Excel journal.
 
     Returns (last_receipt_number, latest_payment_date).
@@ -136,7 +136,7 @@ def read_journal_state(config: dict) -> tuple[int, date]:
 
     _cross_check_merged_dir(merged_dir, max_year, receipt_number)
 
-    return receipt_number, latest_payment_date
+    return max_year, receipt_number, latest_payment_date
 
 
 def _cross_check_merged_dir(merged_dir: Path, year: int, expected: int) -> None:

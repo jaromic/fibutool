@@ -684,6 +684,54 @@ class TestProcessFilesystemSource:
         assert saved == ["Rechnung_001.pdf"]
 
 
+# ── anchor-date since calculation ────────────────────────────────────────────
+
+class TestAnchorDateSince:
+    """Verify that since_days is counted from anchor_date, not from today."""
+
+    def _set_mtime(self, path: Path, d: date) -> None:
+        import calendar, os
+        ts = calendar.timegm(d.timetuple())
+        os.utime(path, (ts, ts))
+
+    def test_anchor_date_extends_lookback(self, tmp_path):
+        # File is 50 days old — excluded by today-21 but included by anchor-21
+        # when anchor is 40 days ago (anchor-21 = 61 days ago < file age 50 days).
+        from datetime import date, timedelta
+        src = tmp_path / "src"
+        src.mkdir()
+        old_file = src / "old_invoice.pdf"
+        _write_pdf(old_file)
+        self._set_mtime(old_file, date.today() - timedelta(days=50))
+
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        since_with_today = date.today() - timedelta(days=21)
+        saved_no_anchor, _ = _process_filesystem_source(
+            _make_fs_source(src), since_with_today, invoices_dir, seen, dry_run=False,
+        )
+        assert saved_no_anchor == [], "file should be excluded when anchored to today"
+
+        anchor = date.today() - timedelta(days=40)
+        since_with_anchor = anchor - timedelta(days=21)
+        saved_with_anchor, _ = _process_filesystem_source(
+            _make_fs_source(src), since_with_anchor, invoices_dir, seen, dry_run=False,
+        )
+        assert saved_with_anchor == ["old_invoice.pdf"], "file should be included when anchored to last payment date"
+
+    def test_anchor_date_parsed_from_iso_string(self):
+        from fetcher import build_parser
+        args = build_parser().parse_args(["--anchor-date", "2026-03-01"])
+        assert args.anchor_date == date(2026, 3, 1)
+
+    def test_anchor_date_defaults_to_none(self):
+        from fetcher import build_parser
+        args = build_parser().parse_args([])
+        assert args.anchor_date is None
+
+
 # ── _imap_date ────────────────────────────────────────────────────────────────
 
 class TestImapDate:

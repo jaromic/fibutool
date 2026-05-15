@@ -123,10 +123,11 @@ def main() -> None:
 
     while True:
         try:
-            receipt_number, last_payment_date = read_journal_state(config)
+            year, receipt_number, last_payment_date = read_journal_state(config)
             print(f"\nJournal state:")
-            print(f"  Last receipt number : {receipt_number}")
-            print(f"  Latest payment date : {last_payment_date}")
+            print(f"  Last receipt year:   {year}")
+            print(f"  Last receipt number: {receipt_number}")
+            print(f"  Latest payment date: {last_payment_date}")
             break
         except Exception as e:
             print(f"\njournal_reader error: {e}", file=sys.stderr)
@@ -166,6 +167,8 @@ def main() -> None:
         seen_registry_path.unlink(missing_ok=True)
 
     fetcher_cmd = fetcher_cmd_base
+    if last_payment_date:
+        fetcher_cmd = fetcher_cmd_base + ["--anchor-date", str(last_payment_date)]
     while True:
         if _run_stage("fetcher — downloading invoices", fetcher_cmd):
             break

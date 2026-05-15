@@ -64,14 +64,18 @@ class SeenRegistry:
 
 # ── Argument parsing and configuration ───────────────────────────────────────
 
-def _parse_args() -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fetcher",
         description="fetcher — Gmail invoice downloader for fibutool",
     )
     parser.add_argument(
         "--since-days", metavar="N", type=int, default=None,
-        help="Override per-source since_days: look back N days from today across all sources",
+        help="Override per-source since_days: look back N days from anchor-date (or today) across all sources",
+    )
+    parser.add_argument(
+        "--anchor-date", metavar="DATE", type=date.fromisoformat, default=None,
+        help="Anchor date for since_days calculation (ISO format: YYYY-MM-DD); defaults to today",
     )
     parser.add_argument(
         "--workdir", "-w", type=Path, default=Path("."), metavar="DIR",
@@ -89,7 +93,11 @@ def _parse_args() -> argparse.Namespace:
         "--dry-run", action="store_true",
         help="List what would be downloaded without writing files or updating the seen registry",
     )
-    return parser.parse_args()
+    return parser
+
+
+def _parse_args() -> argparse.Namespace:
+    return build_parser().parse_args()
 
 
 def _load_config(config_path: Path) -> dict:
@@ -646,8 +654,9 @@ def main() -> None:
             print(f"fetcher: error — source [{label}] has no since_days configured and --since-days was not provided", file=sys.stderr)
             all_warnings.append(f"[fetcher/{label}] skipped — no since_days configured")
             continue
-        since = date.today() - timedelta(days=since_days)
-        print(f"  since: {since}  ({since_days} days ago)")
+        anchor = args.anchor_date or date.today()
+        since = anchor - timedelta(days=since_days)
+        print(f"  since: {since}  ({since_days} days before {anchor})")
 
         if source_type == "gmail":
             saved, warnings = _process_gmail_source(source, since, invoices_dir, seen, args.dry_run)
