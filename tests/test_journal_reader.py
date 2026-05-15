@@ -7,8 +7,8 @@ import pytest
 
 from journal_reader import _cross_check_merged_dir, read_journal_state
 
-HEADERS = ["Jahr", "Belegnummer", "Buchungsdatum"]
-DATE_COL, YEAR_COL, RECEIPT_COL = "Buchungsdatum", "Jahr", "Belegnummer"
+HEADERS = ["Jahr", "Belegnummer", "Buchungsdatum", "Bezeichnung", "Brutto"]
+DATE_COL, YEAR_COL, RECEIPT_COL, DESCRIPTION_COL, AMOUNT_COL = "Buchungsdatum", "Jahr", "Belegnummer", "Bezeichnung", "Brutto"
 
 
 def _make_workbook(
@@ -22,7 +22,7 @@ def _make_workbook(
     ws.title = sheet_name
     ws.append(headers)
     for row in rows:
-        ws.append(list(row))
+        ws.append(list(row)+['bez',30.0])
     path = tmp_path / "journal.xlsx"
     wb.save(path)
     return path
@@ -36,6 +36,8 @@ def _make_config(wb_path: Path, merged_dir: Path, sheet: str = "Journal") -> dic
             "payment_date_column": DATE_COL,
             "year_column": YEAR_COL,
             "receipt_number_column": RECEIPT_COL,
+            "description_column": RECEIPT_COL,
+            "amount_column": AMOUNT_COL,
             "permanent_merged_dir": str(merged_dir),
         }
     }
@@ -58,7 +60,7 @@ class TestReadJournalState:
             (2026, 41, date(2026, 3, 1)),
             (2026, 42, date(2026, 4, 15)),
         ])
-        year, receipt, pdate = read_journal_state(_make_config(wb, merged))
+        _,year, receipt, pdate = read_journal_state(_make_config(wb, merged))
 
         assert year == 2026
         assert receipt == 42
@@ -74,7 +76,7 @@ class TestReadJournalState:
             (2026, 3, date(2026, 2, 1)),
             (2026, 5, date(2026, 4, 20)),
         ])
-        year, receipt, pdate = read_journal_state(_make_config(wb, merged))
+        _,year, receipt, pdate = read_journal_state(_make_config(wb, merged))
 
         assert year == 2026
         assert receipt == 5
@@ -94,7 +96,7 @@ class TestReadJournalState:
         path = tmp_path / "journal.xlsx"
         wb.save(path)
 
-        year, receipt, pdate = read_journal_state(_make_config(path, merged))
+        _,year, receipt, pdate = read_journal_state(_make_config(path, merged))
         assert year == 2026
         assert receipt == 1
         assert pdate == date(2026, 3, 10)
@@ -109,7 +111,7 @@ class TestReadJournalState:
             (2026, None, date(2026, 1, 1)),
             (2026, 2, date(2026, 4, 1)),
         ])
-        year, receipt, _ = read_journal_state(_make_config(wb, merged))
+        _,year, receipt, _ = read_journal_state(_make_config(wb, merged))
         assert year == 2026
         assert receipt == 2
 
@@ -168,10 +170,23 @@ class TestReadJournalState:
             (2025, 50, date(2025, 11, 1)),
             (2026, 3,  date(2026, 5, 1)),
         ])
-        year, receipt, pdate = read_journal_state(_make_config(wb, merged))
+        _, year, receipt, pdate = read_journal_state(_make_config(wb, merged))
         assert year == 2026
         assert receipt == 3
         assert pdate == date(2026, 5, 1)
+
+    def test_read_journal_state_returns_latest_entries(self, tmp_path):
+        merged = tmp_path / "merged"
+        merged.mkdir()
+        _write_merged_file(merged, 3, 2026)
+
+        wb = _make_workbook(tmp_path, [
+            (2024, 99, date(2024, 12, 1)),
+            (2025, 50, date(2025, 11, 1)),
+            (2026, 3,  date(2026, 5, 1)),
+        ])
+        entries,_,_,_ = read_journal_state(_make_config(wb, merged))
+        assert entries != []
 
 
 # ── _cross_check_merged_dir ───────────────────────────────────────────────────

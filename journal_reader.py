@@ -31,7 +31,7 @@ def _find_last_data_row(ws) -> int:
     return last
 
 
-def read_journal_state(config: dict) -> tuple[int, int, date]:
+def read_journal_state(config: dict) -> tuple[list, int, int, date]:
     """Read last receipt number and latest payment date from the configured Excel journal.
 
     Returns (last_receipt_number, latest_payment_date).
@@ -48,6 +48,8 @@ def read_journal_state(config: dict) -> tuple[int, int, date]:
     date_col: str = cfg["payment_date_column"]
     year_col: str = cfg["year_column"]
     receipt_col: str = cfg["receipt_number_column"]
+    description_col: str = cfg["description_column"]
+    amount_col: str = cfg["amount_column"]
     merged_dir = Path(cfg["permanent_merged_dir"]).expanduser()
 
     if not wb_path.exists():
@@ -87,13 +89,18 @@ def read_journal_state(config: dict) -> tuple[int, int, date]:
     date_idx = col_idx(date_col)
     year_idx = col_idx(year_col)
     receipt_idx = col_idx(receipt_col)
+    description_idx = col_idx(description_col)
+    amount_idx = col_idx(amount_col)
 
     # Parse data rows — skip rows with missing or non-parseable values
     records: list[tuple[int, int, date]] = []  # (year, receipt_num, payment_date)
+    entries: list[tuple[int, int, date, str]] = []
     for row in rows[data_start:]:
         year_val = row[year_idx]
         receipt_val = row[receipt_idx]
         date_val = row[date_idx]
+        description_val=row[description_idx]
+        amount_val=row[amount_idx]
 
         if year_val is None or receipt_val is None or date_val is None:
             continue
@@ -112,6 +119,7 @@ def read_journal_state(config: dict) -> tuple[int, int, date]:
             continue
 
         records.append((year, receipt_num, payment_date))
+        entries.append((year, receipt_num, payment_date, description_val, amount_val))
 
     if not records:
         raise ValueError(f"No valid data rows found in sheet '{sheet_name}'")
@@ -136,7 +144,7 @@ def read_journal_state(config: dict) -> tuple[int, int, date]:
 
     _cross_check_merged_dir(merged_dir, max_year, receipt_number)
 
-    return max_year, receipt_number, latest_payment_date
+    return entries, max_year, receipt_number, latest_payment_date
 
 
 def _cross_check_merged_dir(merged_dir: Path, year: int, expected: int) -> None:

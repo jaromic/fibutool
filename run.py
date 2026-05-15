@@ -123,11 +123,14 @@ def main() -> None:
 
     while True:
         try:
-            year, receipt_number, last_payment_date = read_journal_state(config)
+            entries, last_receipt_year, last_receipt_number, last_payment_date = read_journal_state(config)
             print(f"\nJournal state:")
-            print(f"  Last receipt year:   {year}")
-            print(f"  Last receipt number: {receipt_number}")
+            print(f"  Last receipt year:   {last_receipt_year}")
+            print(f"  Last receipt number: {last_receipt_number}")
             print(f"  Latest payment date: {last_payment_date}")
+            print(f"\n  Latest 5 journal entries:\n")
+            for (year, receipt_number, payment_date, description, amount) in entries[-5:]:
+                print(f"   {year:03d}-{receipt_number}  {payment_date}  {amount: 7.2f}  {description}")
             break
         except Exception as e:
             print(f"\njournal_reader error: {e}", file=sys.stderr)

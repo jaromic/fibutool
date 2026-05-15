@@ -35,6 +35,8 @@ original_journal:
   payment_date_column: "Buchungsdatum"            # column header for booking/payment date
   year_column: "Jahr"                             # column header for the year (integer)
   receipt_number_column: "Belegnummer"            # column header for receipt number (integer, unique per year)
+  description_column: "Bezeichnung"
+  amount_column: "Brutto"
   permanent_merged_dir: "~/Documents/Buchhaltung/Belege"  # archive of all merged PDFs (for cross-check)
 
 fetcher:
