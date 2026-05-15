@@ -195,8 +195,8 @@ class TestRoundTrip:
         }
         path.write_text(json.dumps(raw), encoding="utf-8")
         loaded = load_results(path)
-        assert "/" in str(loaded[0].payment.pdf_path)
-        assert "\\" not in str(loaded[0].payment.pdf_path)
+        assert "/" in loaded[0].payment.pdf_path.as_posix()
+        assert "\\" not in loaded[0].payment.pdf_path.as_posix()
 
 
 # ── load_all_invoices ─────────────────────────────────────────────────────────
