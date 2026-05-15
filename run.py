@@ -16,6 +16,7 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path
+from shutil import copy2
 
 import yaml
 
@@ -214,6 +215,27 @@ def main() -> None:
             break
         # retry: loop
 
+    # ── Stage 6: copy merged receipts to permanent storage ────────────────────
+    permanent_merged_dir_str = config.get("original_journal",{}).get("permanent_merged_dir")
+    n_copied = n_skipped = 0
+
+    if permanent_merged_dir_str:
+        permanent_merged_dir = Path(permanent_merged_dir_str).expanduser()
+        if permanent_merged_dir.exists():
+            for merged_receipt in (workdir / "merged").glob("*.pdf", case_sensitive=False):
+                target_path = permanent_merged_dir / merged_receipt.name
+                if not target_path.exists():
+                    copy2(merged_receipt, target_path)
+                    n_copied += 1
+                else:
+                    print(f"'{merged_receipt.name}' already exists in '{permanent_merged_dir}', skipping.")
+                    n_skipped += 1
+        else:
+            print(f"Permanent merge dir '{permanent_merged_dir}' does not exist, not copying merged files.")
+    else:
+        print(f"Permanent merge dir not configured, not copying merged files.")
+
+    print(f"{n_copied} files copied. {n_skipped} files skipped.")
 
 if __name__ == "__main__":
     main()
