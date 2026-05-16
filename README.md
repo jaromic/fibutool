@@ -232,6 +232,11 @@ MSYS_NO_PATHCONV=1 docker run -it -v "$(pwd -W)":/workspace -w /workspace --name
 
 # Linux / macOS:
 docker run -it -v "$(pwd)":/workspace -w /workspace --name fibutool-dev fibutool-dev
+
+# Re-attach to existing container later:
+docker container ls -a
+docker container start <fibutool-dev>
+docker container attach <fibutool-dev>
 ```
 
 The host repo is bind-mounted to `/workspace` inside the container, so edits on either side are reflected immediately.
