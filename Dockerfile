@@ -17,4 +17,7 @@ COPY requirements.txt .
 # install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY . .
+RUN pip install .
+
 CMD ["bash"]

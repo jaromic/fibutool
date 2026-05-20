@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Runs acceptance tests before every push.
+# Override with: git push --no-verify
+set -euo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+exec bash "$REPO_ROOT/tests/acceptance/run.sh"

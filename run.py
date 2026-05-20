@@ -40,6 +40,10 @@ def _parse_args() -> argparse.Namespace:
         "--clean", action="store_true",
         help="Remove previous run output and force a full run (passed through to fibutool-process)",
     )
+    parser.add_argument(
+        "--non-interactive", "-y", action="store_true",
+        help="Skip interactive prompts (Stage 2 user confirmation); stage failures abort immediately",
+    )
     return parser.parse_args()
 
 
@@ -59,8 +63,11 @@ def _prompt_manual_journal_state() -> int:
             print("  Invalid last receipt number — please enter an integer.")
 
 
-def _prompt_arc(stage: str) -> str:
+def _prompt_arc(stage: str, non_interactive: bool = False) -> str:
     """Prompt the user for abort / retry / continue after a stage failure."""
+    if non_interactive:
+        print(f"\n[{stage}] failed. Non-interactive mode — aborting.", file=sys.stderr)
+        return "abort"
     while True:
         try:
             choice = input(f"\n[{stage}] failed. [a]bort / [r]etry / [c]ontinue? ").strip().lower()
@@ -99,6 +106,7 @@ def _run_stage(label: str, cmd: list[str]) -> bool:
 
 def main() -> None:
     args = _parse_args()
+    non_interactive = args.non_interactive
     workdir = args.workdir.resolve()
     setup_logging(workdir, "run")
     config_path = (args.config if args.config is not None else default_config_path()).resolve()
@@ -135,7 +143,7 @@ def main() -> None:
             break
         except Exception as e:
             print(f"\njournal_reader error: {e}", file=sys.stderr)
-            choice = _prompt_arc("journal read")
+            choice = _prompt_arc("journal read", non_interactive)
             if choice == "abort":
                 sys.exit(1)
             elif choice == "retry":
@@ -146,23 +154,32 @@ def main() -> None:
 
     # ── Stage 2: user downloads payment receipts ──────────────────────────────
     payments_dir = workdir / "payments"
-    if last_payment_date:
-        print(f"\nPlease download all bank payment receipts since {last_payment_date}")
-    else:
-        print(f"\nPlease download all bank payment receipts")
-    print(f"and place them in:  {payments_dir}")
-    while True:
-        try:
-            input("\nPress Enter when done (Ctrl+C to abort)...")
-        except KeyboardInterrupt:
-            print("\nAborted.", file=sys.stderr)
-            sys.exit(1)
+    if non_interactive:
         if not payments_dir.exists():
-            print(f"  Directory {payments_dir}/ does not exist — please create it and add payment receipts.")
-        elif not (any(payments_dir.glob("*.pdf")) or any(payments_dir.glob("*.PDF"))):
-            print(f"  No PDF files found in {payments_dir}/ — please add payment receipts and try again.")
+            print(f"Non-interactive mode: payments directory {payments_dir}/ not found — aborting.", file=sys.stderr)
+            sys.exit(1)
+        if not (any(payments_dir.glob("*.pdf")) or any(payments_dir.glob("*.PDF"))):
+            print(f"Non-interactive mode: no PDF files found in {payments_dir}/ — aborting.", file=sys.stderr)
+            sys.exit(1)
+        print(f"\nNon-interactive mode: payments directory confirmed ({payments_dir})")
+    else:
+        if last_payment_date:
+            print(f"\nPlease download all bank payment receipts since {last_payment_date}")
         else:
-            break
+            print(f"\nPlease download all bank payment receipts")
+        print(f"and place them in:  {payments_dir}")
+        while True:
+            try:
+                input("\nPress Enter when done (Ctrl+C to abort)...")
+            except KeyboardInterrupt:
+                print("\nAborted.", file=sys.stderr)
+                sys.exit(1)
+            if not payments_dir.exists():
+                print(f"  Directory {payments_dir}/ does not exist — please create it and add payment receipts.")
+            elif not (any(payments_dir.glob("*.pdf")) or any(payments_dir.glob("*.PDF"))):
+                print(f"  No PDF files found in {payments_dir}/ — please add payment receipts and try again.")
+            else:
+                break
 
     # ── Stage 3: fetcher ──────────────────────────────────────────────────────
     if args.clean:
@@ -179,7 +196,7 @@ def main() -> None:
     while True:
         if _run_stage("fetcher — downloading invoices", fetcher_cmd):
             break
-        choice = _prompt_arc("fetcher")
+        choice = _prompt_arc("fetcher", non_interactive)
         if choice == "abort":
             sys.exit(1)
         elif choice == "continue":
@@ -198,7 +215,7 @@ def main() -> None:
     while True:
         if _run_stage("fibutool — processing session", fibutool_cmd):
             break
-        choice = _prompt_arc("fibutool")
+        choice = _prompt_arc("fibutool", non_interactive)
         if choice == "abort":
             sys.exit(1)
         elif choice == "continue":
@@ -211,7 +228,7 @@ def main() -> None:
     while True:
         if _run_stage("journal updater — appending entries to Excel workbook", updater_cmd):
             break
-        choice = _prompt_arc("journal updater")
+        choice = _prompt_arc("journal updater", non_interactive)
         if choice == "abort":
             sys.exit(1)
         elif choice == "continue":

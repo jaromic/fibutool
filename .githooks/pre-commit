@@ -1,2 +1,2 @@
 #!/bin/sh
-python -m pytest -q
+python -m pytest tests/ --ignore=tests/acceptance -q

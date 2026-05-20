@@ -1,0 +1,44 @@
+anthropic_api_key: ${ANTHROPIC_API_KEY}
+
+mixed_vat_label: "gemischt"
+decimal_separator: ","
+ig_vat_rate: 20
+default_einnahmen_category: "Waren-/Leistungserlöse"
+default_ausgaben_category: "sonstige Betriebsausgaben"
+
+own_company_names:
+  - J. Muster, IT-Dienstleistungen
+  - J. Muster
+
+category_rules:
+  NetConnect Austria: "Telefon/Internet"
+
+business_percentage_rules:
+  NetConnect Austria: 66.67
+  Stadtgemeinde Waldbach: 9.2154
+
+position_business_rules:
+  "Stadtgemeinde Waldbach":
+    business_keywords:
+      - "Grundsteuer"
+      - "Kanal"
+      - "Seuchenvorsorge"
+      - "Abfallwirtschaft"
+
+original_journal:
+  path: "/workdir/before.xlsx"
+  sheet: "Journal"
+  payment_date_column: "Buchungsdatum"
+  year_column: "Jahr"
+  receipt_number_column: "Belegnummer"
+  description_column: "Bezeichnung"
+  amount_column: "Brutto"
+  permanent_merged_dir: "/workdir/permanent_merged"
+
+fetcher:
+  filesystem_sources:
+    - label: "test_invoices"
+      path: "/workdir/invoice_sources"
+      recursive: false
+      since_days: 365
+      filter_by_mtime: false
