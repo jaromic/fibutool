@@ -18,6 +18,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN pip install .
+RUN pip install build && python -m build --wheel && pip install dist/*.whl
 
 CMD ["bash"]
