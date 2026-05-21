@@ -11,7 +11,13 @@ FIXTURES="$SCRIPT_DIR/fixtures"
 
 # ── API key ──────────────────────────────────────────────────────────────────
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-    echo "ERROR: ANTHROPIC_API_KEY is not set." >&2
+    CONFIG_YAML="$REPO_ROOT/config.yaml"
+    if [[ -f "$CONFIG_YAML" ]]; then
+        ANTHROPIC_API_KEY=$(grep '^anthropic_api_key:' "$CONFIG_YAML" | sed 's/^anthropic_api_key:[[:space:]]*//' | tr -d '"'"'")
+    fi
+fi
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    echo "ERROR: ANTHROPIC_API_KEY not set and could not be read from config.yaml." >&2
     exit 1
 fi
 
