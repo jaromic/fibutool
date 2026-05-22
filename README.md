@@ -14,27 +14,46 @@ Downloads invoice PDFs from configured sources (Google Workspace email via OAuth
 
 Reads the last receipt number and latest payment date from the original journal Excel workbook (`.xlsx`). Cross-checks the receipt number against the permanent merged PDF archive to detect inconsistencies before a run starts. Used by the orchestration layer; can also be called standalone.
 
+### Journal updater — `journal_updater.py`
+Appends the rows from journal.csv into the original Excel journal workbook. Invoked automatically by the orchestration layer after processing
+
 ### Orchestration layer — `run.py`
 
-The normal entry point for a bookkeeping session. Uses the journal reader to obtain session parameters, guides the user through the one manual step (downloading bank payment receipts), then runs fetcher and fibutool in sequence. Offers abort / retry / continue at every stage.
+The normal entry point for a bookkeeping session. 
+
+ * Uses the journal reader to obtain session parameters.
+ * Guides the user through the one manual step (downloading bank payment receipts)
+ * Runs fetcher and fibutool (`process.py`) in sequence
+ * Runs journal updater to update the original journal Excel workbook
+ * Copies merged PDFs to the permanent archive
+
+Offers abort / retry / continue at every stage.
 
 ### Processing layer — `fibutool-process` (`process.py`)
 
 Core bookkeeping pipeline using Claude as AI backbone.
 
-**Pipeline (4 steps):**
+**Full mode** (no `match_results.json`, or `--clean`):
 
-1. **Extract** (`extractor.py`) — sends each PDF as a base64 document to Claude (`claude-sonnet-4-6`) to parse structured fields (date, amount, currency, counterparty, direction, VAT rate, address).
+1. **Extract payments** — one Claude (`claude-sonnet-4-6`) call per PDF in `payments/`; produces structured data (date, amount, counterparty, direction).
+2. **Order payments** — sort by booking date, assign sequential receipt numbers, write renamed copies to `payments-ordered/`.
+3. **Extract invoices** — one Claude (`claude-sonnet-4-6`) call per PDF in `invoices/`.
+4. **Match** — single batch Claude (`claude-opus-4-7`) call across all payments and invoices; assigns best invoice to each payment; saves `match_results.json`.
+5. **Merge** — one merged PDF per payment written to `merged/`.
+6. **Journal** — writes `journal.csv`.
 
-2. **Order** (`orderer.py`) — sorts payments by booking date, renames them with sequential receipt numbers (`001_2024-01-15_original.pdf`), copies them to `payments-ordered/`.
+**Resume mode** (`match_results.json` exists, no `--clean`):
 
-3. **Match** (`matcher.py`) — sends all payments and all invoices in a single batch call to Claude (`claude-opus-4-7`); returns the best assignment for each payment based on company name, amount, direction, and date proximity.
+1. Load previous results from `match_results.json`.
+2. **Extract new invoices only** — invoices not seen in the previous run.
+3. **Re-match unmatched payments only** — payments without an invoice are re-matched against all available invoices; `match_results.json` updated.
+4. **Merge** and **Journal** — same as full mode.
 
-4. **Merge + Journal** (`merger.py`, `journal.py`) — merges each matched invoice+payment into a single PDF in `merged/`; writes a `journal.csv` in Austrian bookkeeping format (semicolon-delimited, UTF-8 BOM for Excel).
+**Journal-only mode** (`--journal-only`): loads `match_results.json`, regenerates `journal.csv`, no API calls.
 
 **Data model** (`models.py`): three dataclasses — `PaymentInfo`, `InvoiceInfo`, `MatchResult` — flow through the whole pipeline.
 
-**AI usage:** Claude is called once per payment (extraction), once per invoice (extraction), and once total for matching. System prompts use prompt caching to reduce costs.
+**AI usage (full mode):** Claude is called once per payment (extraction), once per invoice (extraction), and once total for matching. Resume mode skips payment extraction and only calls Claude for new invoices and unmatched payments. System prompts use prompt caching to reduce costs.
 
 **Invoice extraction** returns invoice positions (Rechnungspositionen) and the supplier's country. From these the pipeline derives:
 - **detail_category** — assigned by rule (`category_rules` in config, keyword → EÜR category); no LLM classification
