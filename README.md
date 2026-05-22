@@ -31,13 +31,9 @@ You download your bank receipts once a month, drop them in a folder, run one com
 
 ## Installation
 
-**1. Download `fibutool.exe`**
+**1. Download and run the installer**
 
-Go to the [latest release](https://github.com/jaromic/fibutool/releases/latest) and download `fibutool.exe`. Save it somewhere permanent, e.g. `C:\tools\fibutool\fibutool.exe`.
-
-**2. Add it to your PATH** (once)
-
-Open *Start → Settings → System → About → Advanced system settings → Environment Variables*. Under *User variables*, edit `Path` and add `C:\tools\fibutool`.
+Go to the [latest release](https://github.com/jaromic/fibutool/releases/latest) and download `fibutool-setup-<version>.exe`. Run it and follow the prompts — it installs fibutool and adds it to your PATH automatically.
 
 Open a new Command Prompt and verify:
 
@@ -45,13 +41,17 @@ Open a new Command Prompt and verify:
 fibutool --version
 ```
 
-**3. Create the config directory and copy the example config**
+**2. Set up the config file**
+
+The installer places `config.yaml.example` in `%APPDATA%\fibutool\`. Copy and rename it:
 
 ```bat
-mkdir "%APPDATA%\fibutool"
+copy "%APPDATA%\fibutool\config.yaml.example" "%APPDATA%\fibutool\config.yaml"
 ```
 
-Download [`config.yaml.example`](https://github.com/jaromic/fibutool/releases/latest) from the release, save it to `%APPDATA%\fibutool\config.yaml`, and open it in a text editor.
+Then open `%APPDATA%\fibutool\config.yaml` in a text editor.
+
+> **Power users:** A standalone `fibutool-<version>.exe` is also available in the release for manual installation without the setup wizard.
 
 **4. Add your Anthropic API key**
 
@@ -113,9 +113,9 @@ Costs are billed directly by Anthropic in USD. You can set a monthly spend limit
 
 ## Data & privacy
 
-fibutool processes your documents **locally** — it reads PDFs from your machine, runs them through the Anthropic API for AI-powered extraction, and writes all results back to your local files. The extracted bookkeeping data (journal CSV, match results) never leaves your machine.
+fibutool reads PDFs from your machine, runs them through the Anthropic API for AI-powered extraction, and writes all results back to your local files. 
 
-The content of your invoice and payment PDFs is transmitted to the Anthropic API during the extraction step. Anthropic does not use API inputs to train their models. See [Anthropic's privacy policy](https://www.anthropic.com/privacy) for details.
+The extracted bookkeeping data (journal CSV, match results) never leaves your machine. However the content of your invoice and payment PDFs is transmitted to the Anthropic API during the extraction step. Anthropic does not use API inputs to train their models. See [Anthropic's privacy policy](https://www.anthropic.com/privacy) for details.
 
 ---
 
