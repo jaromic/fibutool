@@ -39,6 +39,7 @@ def match_payments(
     payments: list[PaymentInfo],
     invoices: list[InvoiceInfo],
     client: anthropic.Anthropic,
+    workdir: Path = Path("."),
 ) -> list[MatchResult]:
     if not invoices:
         return [
@@ -116,7 +117,7 @@ def match_payments(
     try:
         assignments = json.loads(text_block.strip())
     except json.JSONDecodeError as e:
-        debug_path = Path(".") / f"llm_debug_matcher_{datetime.now().strftime('%Y%m%dT%H%M%S')}.txt"
+        debug_path = workdir / f"llm_debug_matcher_{datetime.now().strftime('%Y%m%dT%H%M%S')}.txt"
         debug_path.write_text(text_block, encoding="utf-8")
         return [
             MatchResult(payment=p, invoice=None, warnings=[

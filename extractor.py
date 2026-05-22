@@ -326,6 +326,7 @@ def _call_claude(
     pdf_path: Path,
     client: anthropic.Anthropic,
     system_prompt: str,
+    workdir: Path,
     max_tokens: int = 512,
 ) -> dict:
     pdf_data = base64.standard_b64encode(pdf_path.read_bytes()).decode("utf-8")
@@ -349,7 +350,7 @@ def _call_claude(
         return _parse_json(text_block)
     except ValueError as e:
         ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-        debug_path = Path(".") / f"{ts}_llm_debug_{pdf_path.stem}.txt"
+        debug_path = workdir / f"{ts}_llm_debug_{pdf_path.stem}.txt"
         debug_path.write_text(text_block, encoding="utf-8")
         raise ValueError(f"{e} — full response saved to {debug_path}") from None
 
@@ -358,8 +359,9 @@ def extract_payment_info(
     pdf_path: Path,
     client: anthropic.Anthropic,
     own_company_names: list[str],
+    workdir: Path = Path("."),
 ) -> PaymentInfo:
-    data = _call_claude(pdf_path, client, PAYMENT_SYSTEM_PROMPT)
+    data = _call_claude(pdf_path, client, PAYMENT_SYSTEM_PROMPT, workdir)
     counterparty = data["counterparty"]
     direction = data.get("direction", "outgoing")
     # Never override outgoing — a debit sign in the document is definitive even if our company
@@ -385,6 +387,7 @@ def extract_invoice_info(
     default_ausgaben_category: str = "sonstige Betriebsausgaben",
     default_einnahmen_category: str = "Waren-/Leistungserlöse",
     own_company_names: list[str] | None = None,
+    workdir: Path = Path("."),
 ) -> InvoiceInfo:
     if own_company_names:
         names_str = ", ".join(f'"{n}"' for n in own_company_names)
@@ -396,7 +399,7 @@ def extract_invoice_info(
         system_prompt = prefix + INVOICE_SYSTEM_PROMPT
     else:
         system_prompt = INVOICE_SYSTEM_PROMPT
-    data = _call_claude(pdf_path, client, system_prompt, max_tokens=4096)
+    data = _call_claude(pdf_path, client, system_prompt, workdir, max_tokens=4096)
     raw_vat = data.get("vat_rate")
     invoice_type = data.get("invoice_type", "incoming_invoice")
     counterparty = data["counterparty"]

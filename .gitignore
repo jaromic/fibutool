@@ -1,7 +1,9 @@
-# Python packaging artifacts
+# Build and packaging artifacts
 *.egg-info/
 __pycache__/
 *.pyc
+dist/
+installer/Output/
 
 # IDE and development files
 .idea
@@ -22,6 +24,7 @@ CLAUDE.local.md
 
 # Logfiles
 *.log
+*_llm_debug_*.txt
 
 # Secrets
 /client_secret_*.json

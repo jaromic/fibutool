@@ -21,7 +21,7 @@ import hashlib
 import imaplib
 import json
 import os.path
-import shutil
+import os
 import sys
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -29,7 +29,7 @@ from pathlib import Path
 import keyring
 import yaml
 
-from shared import Tee, default_config_path, setup_logging
+from shared import default_config_path, setup_logging
 
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 IMAP_KEYRING_SERVICE = "fibutool-fetcher"
@@ -152,6 +152,7 @@ def _authenticate_gmail(client_secret_file: Path, token_file: Path):
 
         token_file.parent.mkdir(parents=True, exist_ok=True)
         token_file.write_text(creds.to_json(), encoding="utf-8")
+        os.chmod(token_file, 0o600)
 
     return build("gmail", "v1", credentials=creds)
 
@@ -218,6 +219,8 @@ def _safe_filename(invoices_dir: Path, name: str, content: bytes) -> Path | None
     content_hash = hashlib.sha256(content).digest()
     counter = 2
     candidate = invoices_dir / name
+    if not candidate.resolve().is_relative_to(invoices_dir.resolve()):
+        raise ValueError(f"Unsafe attachment filename rejected: {name!r}")
     while True:
         if not candidate.exists():
             return candidate

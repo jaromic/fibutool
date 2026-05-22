@@ -173,6 +173,7 @@ def _extract_invoices(
     client,
     category_rules: dict,
     position_business_rules: dict,
+    workdir: Path,
     default_ausgaben_category: str = "sonstige Betriebsausgaben",
     default_einnahmen_category: str = "Waren-/Leistungserlöse",
     own_company_names: list[str] | None = None,
@@ -185,7 +186,7 @@ def _extract_invoices(
             info = extract_invoice_info(
                 pdf_path, client, category_rules, position_business_rules,
                 default_ausgaben_category, default_einnahmen_category,
-                own_company_names=own_company_names,
+                own_company_names=own_company_names, workdir=workdir,
             )
             invoices.append(info)
             print(f"{info.invoice_date}  {info.currency} {info.gross_total}  {info.counterparty}")
@@ -204,6 +205,7 @@ def _full_mode(
     match_cache_path: Path,
     client,
     config: dict,
+    workdir: Path,
 ) -> tuple[list[MatchResult], list[str]]:
     own_company_names: list[str] = config.get("own_company_names", [])
     category_rules: dict = config.get("category_rules", {})
@@ -241,7 +243,7 @@ def _full_mode(
     for pdf_path in payment_pdfs:
         print(f"  {pdf_path.name} ... ", end="", flush=True)
         try:
-            info = extract_payment_info(pdf_path, client, own_company_names)
+            info = extract_payment_info(pdf_path, client, own_company_names, workdir=workdir)
             payments.append(info)
             print(f"{info.booking_date}  {info.currency} {info.amount}  [{info.direction}]  {info.counterparty}")
             if info.direction == "incoming" and any(
@@ -267,7 +269,7 @@ def _full_mode(
     # Step 2: Extract invoices + match
     print(f"\nStep 2: Extracting {len(invoice_pdfs)} invoice(s)...")
     invoices, invoice_warnings = _extract_invoices(
-        invoice_pdfs, client, category_rules, position_business_rules,
+        invoice_pdfs, client, category_rules, position_business_rules, workdir,
         default_ausgaben_category, default_einnahmen_category,
         own_company_names=own_company_names,
     )
@@ -276,7 +278,7 @@ def _full_mode(
         print("Warning: no invoices could be extracted — all payments will be unmatched.", file=sys.stderr)
 
     print("  Matching payments to invoices...")
-    results = match_payments(sorted_payments, invoices, client)
+    results = match_payments(sorted_payments, invoices, client, workdir)
     for result in results:
         if result.invoice:
             result.business_percentage = apply_percentage_rules(
@@ -294,6 +296,7 @@ def _resume_mode(
     match_cache_path: Path,
     client,
     config: dict,
+    workdir: Path,
 ) -> tuple[list[MatchResult], list[str]]:
     category_rules: dict = config.get("category_rules", {})
     business_percentage_rules: dict = config.get("business_percentage_rules", {})
@@ -312,7 +315,7 @@ def _resume_mode(
 
     print(f"\nStep 2: Extracting {len(new_invoice_pdfs)} new invoice(s)...")
     new_invoices, warnings = _extract_invoices(
-        new_invoice_pdfs, client, category_rules, position_business_rules,
+        new_invoice_pdfs, client, category_rules, position_business_rules, workdir,
         default_ausgaben_category, default_einnahmen_category,
         own_company_names=own_company_names,
     )
@@ -324,7 +327,7 @@ def _resume_mode(
         already_matched_names = {r.invoice.pdf_path.name for r in prev_results if r.invoice is not None}
         available_invoices = [inv for inv in all_invoices if inv.pdf_path.name not in already_matched_names]
         print(f"  Re-matching {len(unmatched)} previously unmatched payment(s) against {len(available_invoices)} available invoice(s)...")
-        rematched = match_payments([r.payment for r in unmatched], available_invoices, client)
+        rematched = match_payments([r.payment for r in unmatched], available_invoices, client, workdir)
         for result in rematched:
             if result.invoice:
                 result.business_percentage = apply_percentage_rules(
@@ -408,10 +411,10 @@ def main() -> None:
         client = anthropic.Anthropic(api_key=config.get("anthropic_api_key") or None)
 
         if is_resume:
-            results, warnings = _resume_mode(invoices_dir, match_cache_path, client, config)
+            results, warnings = _resume_mode(invoices_dir, match_cache_path, client, config, workdir)
         else:
             results, warnings = _full_mode(
-                args, payments_dir, invoices_dir, payments_ordered_dir, match_cache_path, client, config
+                args, payments_dir, invoices_dir, payments_ordered_dir, match_cache_path, client, config, workdir
             )
 
         _do_merge_pdfs(results, merged_dir, decimal_separator)
