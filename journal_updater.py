@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from journal_reader import _find_last_data_row, _locate_sheet, _open_workbook
+from journal_reader import locate_sheet, open_workbook
 from shared import default_config_path
 
 
@@ -124,9 +124,9 @@ def run(config: dict, workdir: Path) -> None:
     if not wb_path.exists():
         raise FileNotFoundError(f"Journal workbook not found: {wb_path}")
 
-    wb = _open_workbook(wb_path, read_only=True, data_only=False)
+    wb = open_workbook(wb_path, read_only=True, data_only=False)
     try:
-        ws = _locate_sheet(wb, sheet_name)
+        ws = locate_sheet(wb, sheet_name)
         all_rows = list(ws.iter_rows(values_only=True))
     finally:
         wb.close()
@@ -221,9 +221,9 @@ def run(config: dict, workdir: Path) -> None:
     try:
         shutil.copy2(wb_path, tmp_path)
 
-        wb = _open_workbook(tmp_path, read_only=False, keep_vba=True, data_only=False)
+        wb = open_workbook(tmp_path, read_only=False, keep_vba=True, data_only=False)
         try:
-            ws = _locate_sheet(wb, sheet_name)
+            ws = locate_sheet(wb, sheet_name)
 
             # Read number formats from last data row for format preservation
             formats = [(

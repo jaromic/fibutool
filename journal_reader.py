@@ -7,12 +7,12 @@ from pathlib import Path
 import openpyxl
 
 
-def _open_workbook(path: Path, *, read_only: bool = True, keep_vba: bool = False, data_only: bool = True) -> openpyxl.Workbook:
+def open_workbook(path: Path, *, read_only: bool = True, keep_vba: bool = False, data_only: bool = True) -> openpyxl.Workbook:
     """Open an openpyxl workbook for read or write access."""
     return openpyxl.load_workbook(path, data_only=data_only, read_only=read_only, keep_vba=keep_vba)
 
 
-def _locate_sheet(wb: openpyxl.Workbook, sheet_name: str):
+def locate_sheet(wb: openpyxl.Workbook, sheet_name: str):
     """Return the named worksheet or raise ValueError."""
     if sheet_name not in wb.sheetnames:
         raise ValueError(
@@ -20,16 +20,6 @@ def _locate_sheet(wb: openpyxl.Workbook, sheet_name: str):
             f"(available: {wb.sheetnames})"
         )
     return wb[sheet_name]
-
-
-def _find_last_data_row(ws) -> int:
-    """Return 1-based row number of the last row with any non-None value. Returns 0 if empty."""
-    last = 0
-    for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
-        if any(cell is not None for cell in row):
-            last = i
-    return last
-
 
 def read_journal_state(config: dict) -> tuple[list, int, int, date]:
     """Read last receipt number and latest payment date from the configured Excel journal.
@@ -55,9 +45,9 @@ def read_journal_state(config: dict) -> tuple[list, int, int, date]:
     if not wb_path.exists():
         raise FileNotFoundError(f"Journal workbook not found: {wb_path}")
 
-    wb = _open_workbook(wb_path, read_only=True)
+    wb = open_workbook(wb_path, read_only=True)
     try:
-        ws = _locate_sheet(wb, sheet_name)
+        ws = locate_sheet(wb, sheet_name)
         rows = list(ws.iter_rows(values_only=True))
     finally:
         wb.close()
@@ -94,13 +84,13 @@ def read_journal_state(config: dict) -> tuple[list, int, int, date]:
 
     # Parse data rows — skip rows with missing or non-parseable values
     records: list[tuple[int, int, date]] = []  # (year, receipt_num, payment_date)
-    entries: list[tuple[int, int, date, str]] = []
+    entries: list[tuple[int, int, date, str, float]] = []
     for row in rows[data_start:]:
         year_val = row[year_idx]
         receipt_val = row[receipt_idx]
         date_val = row[date_idx]
         description_val=row[description_idx]
-        amount_val=row[amount_idx]
+        amount_val=row[amount_idx] or 0.0
 
         if year_val is None or receipt_val is None or date_val is None:
             continue
