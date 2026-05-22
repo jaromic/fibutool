@@ -78,6 +78,10 @@ def generate_csv(
                 gross = sum(p.gross_amount for p in active_positions)
             else:
                 active_positions = invoice.positions if (invoice and same_currency) else []
+                if invoice and not same_currency:
+                    result.warnings.append(
+                        f"{invoice.counterparty}: currency mismatch ({invoice.currency} invoice vs {payment.currency} payment) — positions dropped"
+                    )
                 gross = payment.amount
 
             # When a forex fee is present the VAT base is the gross minus the fee;
@@ -102,6 +106,9 @@ def generate_csv(
                 vat_amount = (effective_base * Decimal(rate) / Decimal(100 + rate)).quantize(Decimal("0.01"))
                 ig_str = str(ig_vat_rate) if _is_ig(invoice) else ""
             else:
+                result.warnings.append(
+                    f"{(invoice.counterparty if invoice else payment.counterparty)}: no VAT info — defaulted to 20%"
+                )
                 vat_val = Decimal(20) / Decimal(100)
                 vat_amount = (effective_base * Decimal(20) / Decimal(120)).quantize(Decimal("0.01"))
                 ig_str = ""
