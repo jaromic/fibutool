@@ -61,4 +61,4 @@ MSYS_NO_PATHCONV=1 docker run --rm \
 # ── Run acceptance tests against AFTER xlsx ───────────────────────────────────
 # journal_updater writes back to before.xlsx in place, making it the AFTER xlsx.
 echo "==> Running acceptance tests..."
-python -m pytest "$SCRIPT_DIR" -v --after-xlsx "$WORKDIR/before.xlsx"
+python -m pytest "$SCRIPT_DIR" -v --after-xlsx "$WORKDIR/before.xlsx" --config "$WORKDIR/config.yaml"

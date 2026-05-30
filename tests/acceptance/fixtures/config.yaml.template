@@ -1,3 +1,5 @@
+last_receipt_number: 10
+
 anthropic_api_key: ${ANTHROPIC_API_KEY}
 
 mixed_vat_label: "gemischt"
