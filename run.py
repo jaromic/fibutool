@@ -12,9 +12,9 @@ Stages
 """
 
 import argparse
-import subprocess
 import sys
 from datetime import date
+from importlib.metadata import version as pkg_version
 from pathlib import Path
 from shutil import copy2
 
@@ -25,8 +25,12 @@ from shared import default_config_path, setup_logging
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="run",
-        description="run — fibutool session orchestrator",
+        prog="fibutool",
+        description="fibutool — bookkeeping session orchestrator",
+    )
+    parser.add_argument(
+        "--version", action="version",
+        version=f"%(prog)s {pkg_version('fibutool')}",
     )
     parser.add_argument(
         "--workdir", "-w", type=Path, default=Path("."), metavar="DIR",
@@ -82,26 +86,26 @@ def _prompt_arc(stage: str, non_interactive: bool = False) -> str:
         print("  Please enter 'a', 'r', or 'c'.")
 
 
-def _run_stage(label: str, cmd: list[str]) -> bool:
-    """Run a subprocess stage, streaming output through the parent Tee. Returns True on success."""
+def _run_stage(label: str, fn, argv: list[str]) -> bool:
+    """Call fn() with the given argv, restoring sys state afterwards. Returns True on success."""
     print(f"\n{'─' * 60}")
     print(f"  {label}")
     print(f"{'─' * 60}")
-    with subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding='utf-8',
-        bufsize=1,
-    ) as proc:
-        for line in proc.stdout:
-            sys.stdout.write(line)
-        proc.wait()
-        returncode = proc.returncode
-    if returncode != 0:
-        print(f"\n  Exit code: {returncode}", file=sys.stderr)
-    return returncode == 0
+    saved_stdout, saved_stderr, saved_argv = sys.stdout, sys.stderr, sys.argv
+    sys.argv = ["fibutool"] + argv
+    try:
+        fn()
+        return True
+    except SystemExit as e:
+        if e.code != 0:
+            print(f"\n  Exit code: {e.code}", file=sys.stderr)
+            return False
+        return True
+    except Exception as e:
+        print(f"\n  Unexpected error: {e}", file=sys.stderr)
+        return False
+    finally:
+        sys.stdout, sys.stderr, sys.argv = saved_stdout, saved_stderr, saved_argv
 
 
 def main() -> None:
@@ -111,18 +115,22 @@ def main() -> None:
     setup_logging(workdir, "run")
     config_path = (args.config if args.config is not None else default_config_path()).resolve()
 
-    with open(config_path, encoding="utf-8") as f:
-        try:
+    try:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
-        except yaml.scanner.ScannerError as e:
-            print(f"Config file formatting error: {e}", file=sys.stderr)
-            sys.exit(1)
+    except FileNotFoundError:
+        print(f"Config file not found: {config_path}", file=sys.stderr)
+        print(f"Copy config.yaml.example to that location and edit it.", file=sys.stderr)
+        sys.exit(1)
+    except yaml.scanner.ScannerError as e:
+        print(f"Config file formatting error: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    here = Path(__file__).parent
-    fetcher_cmd_base = [sys.executable, str(here / "fetcher.py"),
-                        "--workdir", str(workdir), "--config", str(config_path)]
-    fibutool_cmd_base = [sys.executable, str(here / "process.py"),
-                         "--workdir", str(workdir), "--config", str(config_path)]
+    from fetcher import main as fetcher_main
+    from process import main as process_main
+    from journal_updater import main as updater_main
+
+    base_argv = ["--workdir", str(workdir), "--config", str(config_path)]
 
     # ── Stage 1: read journal ─────────────────────────────────────────────────
     from journal_reader import read_journal_state
@@ -190,11 +198,11 @@ def main() -> None:
             print(f"  removing {f.name}")
             f.unlink(missing_ok=True)
 
-    fetcher_cmd = fetcher_cmd_base
+    fetcher_argv = base_argv[:]
     if last_payment_date:
-        fetcher_cmd = fetcher_cmd_base + ["--anchor-date", str(last_payment_date)]
+        fetcher_argv += ["--anchor-date", str(last_payment_date)]
     while True:
-        if _run_stage("fetcher — downloading invoices", fetcher_cmd):
+        if _run_stage("fetcher — downloading invoices", fetcher_main, fetcher_argv):
             break
         choice = _prompt_arc("fetcher", non_interactive)
         if choice == "abort":
@@ -205,15 +213,15 @@ def main() -> None:
 
     # ── Stage 4: fibutool ─────────────────────────────────────────────────────
     match_results = workdir / "match_results.json"
+    process_argv = base_argv[:]
     if match_results.exists() and not args.clean:
         print("\nResuming from existing match_results.json  (run with --clean to start fresh)")
-        fibutool_cmd = fibutool_cmd_base
     else:
-        fibutool_cmd = fibutool_cmd_base + ["-n", str(last_receipt_number)]
+        process_argv += ["-n", str(last_receipt_number)]
         if args.clean:
-            fibutool_cmd += ["--clean"]
+            process_argv += ["--clean"]
     while True:
-        if _run_stage("fibutool — processing session", fibutool_cmd):
+        if _run_stage("fibutool — processing session", process_main, process_argv):
             break
         choice = _prompt_arc("fibutool", non_interactive)
         if choice == "abort":
@@ -223,10 +231,8 @@ def main() -> None:
         # retry: loop
 
     # ── Stage 5: journal updater ──────────────────────────────────────────────
-    updater_cmd = [sys.executable, str(here / "journal_updater.py"),
-                   "--workdir", str(workdir), "--config", str(config_path)]
     while True:
-        if _run_stage("journal updater — appending entries to Excel workbook", updater_cmd):
+        if _run_stage("journal updater — appending entries to Excel workbook", updater_main, base_argv):
             break
         choice = _prompt_arc("journal updater", non_interactive)
         if choice == "abort":
@@ -236,7 +242,7 @@ def main() -> None:
         # retry: loop
 
     # ── Stage 6: copy merged receipts to permanent storage ────────────────────
-    permanent_merged_dir_str = config.get("original_journal",{}).get("permanent_merged_dir")
+    permanent_merged_dir_str = config.get("original_journal", {}).get("permanent_merged_dir")
     n_copied = n_skipped = 0
 
     if permanent_merged_dir_str:

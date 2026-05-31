@@ -27,8 +27,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; Main executable
 Source: "..\dist\fibutool.exe"; DestDir: "{app}"; Flags: ignoreversion
 
-; Example config — placed in %APPDATA%\fibutool\ so it is ready to rename
-Source: "..\config.yaml.example"; DestDir: "{userappdata}\fibutool"; Flags: ignoreversion
+; Example config — placed next to the EXE so the user can rename it to config.yaml
+Source: "..\config.yaml.example"; DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]
 ; Add install dir to user PATH

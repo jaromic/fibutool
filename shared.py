@@ -6,7 +6,9 @@ from pathlib import Path
 
 
 def default_config_path() -> Path:
-    """Return the default config path: config.yaml in the same directory as this file."""
+    """Return the default config path: next to the EXE (frozen) or next to the script (dev)."""
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent / "config.yaml"
     return Path(__file__).parent / "config.yaml"
 
 
