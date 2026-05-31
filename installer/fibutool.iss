@@ -3,6 +3,7 @@
 #define MyAppURL "https://github.com/jaromic/fibutool"
 
 [Setup]
+AppId={{E4B7C2A1-3F8D-4E9B-A5C6-7D2F1E0B9834}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -27,7 +28,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "..\dist\fibutool.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Example config — placed in %APPDATA%\fibutool\ so it is ready to rename
-Source: "..\config.yaml.example"; DestDir: "{userappdata}\fibutool"; Flags: ignoreversion createallsubdirs
+Source: "..\config.yaml.example"; DestDir: "{userappdata}\fibutool"; Flags: ignoreversion
 
 [Registry]
 ; Add install dir to user PATH
