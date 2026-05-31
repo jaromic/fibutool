@@ -54,10 +54,6 @@ jobs:
       - name: Build EXE
         run: pyinstaller fibutool.spec
 
-      - name: Rename EXE
-        shell: bash
-        run: mv dist/fibutool.exe "dist/fibutool-${{ steps.version.outputs.version }}.exe"
-
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
@@ -76,5 +72,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/fibutool-${{ steps.version.outputs.version }}.exe
+            dist/fibutool.exe
             installer/Output/fibutool-setup-${{ steps.version.outputs.version }}.exe
