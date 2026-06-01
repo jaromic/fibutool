@@ -14,9 +14,17 @@ Stages
 import argparse
 import sys
 from datetime import date
-from importlib.metadata import version as pkg_version
 from pathlib import Path
 from shutil import copy2
+
+try:
+    from _version import __version__ as _VERSION
+except ImportError:
+    try:
+        from importlib.metadata import version as _pkg_version
+        _VERSION = _pkg_version('fibutool')
+    except Exception:
+        _VERSION = "unknown"
 
 import yaml
 
@@ -30,7 +38,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--version", action="version",
-        version=f"%(prog)s {pkg_version('fibutool')}",
+        version=f"%(prog)s {_VERSION}",
     )
     parser.add_argument(
         "--workdir", "-w", type=Path, default=Path("."), metavar="DIR",

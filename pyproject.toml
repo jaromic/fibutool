@@ -43,6 +43,7 @@ py-modules = [
 #   git tag v1.0.0
 #   git push origin v1.0.0
 #   pip install -e .        ← reinstall so fibutool --version reflects the new tag
+version_file = "_version.py"
 
 [tool.pytest.ini_options]
 filterwarnings = [

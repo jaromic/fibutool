@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 dist/
 installer/Output/
+_version.py
 
 # IDE and development files
 .idea
