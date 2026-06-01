@@ -27,6 +27,5 @@ CLAUDE.local.md
 *.log
 *_llm_debug_*.txt
 
-# Secrets
-/client_secret_*.json
+# OAuth user tokens (personal, never commit)
 /fetcher*.json

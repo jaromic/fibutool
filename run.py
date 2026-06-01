@@ -74,6 +74,8 @@ def _prompt_manual_journal_state() -> int:
         except ValueError:
             print("  Invalid last receipt number — please enter an integer.")
 
+    return last_receipt_number
+
 
 def _prompt_arc(stage: str, non_interactive: bool = False) -> str:
     """Prompt the user for abort / retry / continue after a stage failure."""
@@ -229,7 +231,7 @@ def main() -> None:
         if args.clean:
             process_argv += ["--clean"]
     while True:
-        if _run_stage("fibutool — processing session", process_main, process_argv):
+        if _run_stage("process — extract, match, merge, journal", process_main, process_argv):
             break
         choice = _prompt_arc("fibutool", non_interactive)
         if choice == "abort":

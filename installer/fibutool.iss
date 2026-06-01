@@ -29,6 +29,8 @@ Source: "..\dist\fibutool.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Example config — placed next to the EXE so the user can rename it to config.yaml
 Source: "..\config.yaml.example"; DestDir: "{app}"; Flags: ignoreversion
+; OAuth app credentials — shared across all users, not a secret for installed apps
+Source: "..\client_secret_*.json"; DestDir: "{app}"; DestName: "client_secret.json"; Flags: ignoreversion
 
 [Registry]
 ; Add install dir to user PATH

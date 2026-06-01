@@ -43,8 +43,8 @@ fetcher:
   gmail_sources:
     - label: "office"           # human-readable name used in logs and --only filter
       username: office@example.com
-      client_secret_file: "~/.config/fibutool/client_secret_office.json"  # downloaded from Google Cloud Console
-      token_file: "~/.config/fibutool/token_office.json"                  # created by fetcher on first run
+      client_secret_file: "client_secret.json"   # installed next to config.yaml by the fibutool installer
+      token_file: "token_office.json"            # created automatically on first run (OAuth browser login)
       folders:
         - INBOX
       filters:                  # AND-combined; omit a list to accept any value
