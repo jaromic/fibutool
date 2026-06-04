@@ -130,7 +130,7 @@ def main() -> None:
             config = yaml.safe_load(f)
     except FileNotFoundError:
         print(f"Config file not found: {config_path}", file=sys.stderr)
-        print(f"Copy config.yaml.example to that location and edit it.", file=sys.stderr)
+        print(f"Copy config.example.yaml to that location and edit it.", file=sys.stderr)
         sys.exit(1)
     except yaml.scanner.ScannerError as e:
         print(f"Config file formatting error: {e}", file=sys.stderr)

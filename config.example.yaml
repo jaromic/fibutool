@@ -1,0 +1,89 @@
+anthropic_api_key: sk-ant-...
+
+mixed_vat_label: "gemischt"
+decimal_separator: ","
+ig_vat_rate: 20
+default_einnahmen_category: "Waren-/Leistungserlöse"
+default_ausgaben_category: "sonstige Betriebsausgaben"
+
+own_company_names:
+  - MyCompany GmbH
+  - Jane Doe
+
+# keyword → detail category (substring match on counterparty name)
+category_rules:
+  Kabelkanal: "Telefon/Internet"
+  A1: "Telefon/Internet"
+  Adobe: "Lizenzgebühren"
+  Sozialversicherungsanstalt: "Pflichtversicherungsbeiträge"
+  Hetzner: "sonstige Betriebsausgaben"
+
+# keyword → % of expense that is business use (substring match on counterparty name)
+business_percentage_rules:
+  Kabelkanal: 66.6667
+
+# keyword → list of keywords that mark a position as business use
+# Positions not matching any business_keyword are treated as private.
+# The business_percentage for the invoice is computed from the position gross amounts.
+# An overview page "Berechnung des abzugsfähigen Anteils" is inserted into the merged PDF.
+position_business_rules:
+  "Marktgemeinde Beispieldorf":
+    business_keywords: ["Abfall", "Seuchen", "Kanal", "Grundsteuer"]
+
+original_journal:
+  path: "C:\\Users\\USERNAME\\Desktop\\fibu\\fibu.xlsm"   # full path to the Excel journal workbook
+  sheet: "Journal"                                # worksheet name
+  payment_date_column: "Zahlungsdatum"            # column header for booking/payment date
+  year_column: "Jahr"                             # column header for the year (integer)
+  receipt_number_column: "Belegnummer"            # column header for receipt number (integer, unique per year)
+  description_column: "Bezeichnung"
+  amount_column: "Brutto"
+  permanent_merged_dir: "C:\\Users\\USERNAME\\Desktop\\fibu\\Journal_Belege"  # archive of all merged PDFs (new merged receipts will be copied there)
+
+fetcher:
+  filesystem_sources:
+    - label: "outgoing invoices"         # own outgoing invoices exported to a local folder
+      path: "C:\\Users\\USERNAME\\Desktop\\fibu\\Rechnung_Ausgang"
+      since_days: 60            # look back n days (credit notes have longer payment cycles)
+      recursive: true          # set true to walk subdirectories
+      filename_patterns:        # glob patterns (default: ["*.pdf"])
+        - "*.pdf"
+
+  gmail_sources:
+    - label: "office"
+      username: office@example.com
+      since_days: 21            # look back n days
+#      client_secret_file: "/workspace/client_secret.json"
+      client_secret_file: "C:\\Users\\USERNAME\\AppData\\Local\\fibutool\\client_secret.json"
+#      token_file: "/workspace/fetcher.gmail.token.json"
+      token_file: "C:\\Users\\USERNAME\\AppData\\Local\\fibutool\\fetcher.gmail.token.json"
+      folders:
+        - INBOX
+        - INBOX/rechnung
+      filters:
+        subject_keywords:
+          - "Rechnung"
+          - "Invoice"
+          - "Gutschrift"
+          - "Receipt"
+          - "Honorarnote"
+          - "Beleg"
+  imap_sources:
+      - label: "private"             # human-readable name used in logs and --only filter
+        host: mail.example.com # IMAP server hostname
+        port: 993                 # IMAP SSL port (default: 993)
+        username: user@example.com
+        since_days: 21            # look back n days
+        # password stored in OS keyring (service "fibutool-fetcher", key "<label>:<username>")
+        # fetcher prompts on first run and stores after successful login
+        folders:
+          - INBOX
+          - rechnung
+        filters:                  # AND-combined; omit a list to accept any value
+          subject_keywords:       # substring match on Subject: header (case-insensitive)
+            - "Rechnung"
+            - "Invoice"
+            - "Gutschrift"
+            - "Receipt"
+            - "Honorarnote"
+            - "Beleg"

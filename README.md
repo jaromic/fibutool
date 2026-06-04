@@ -43,13 +43,13 @@ fibutool --version
 
 **2. Set up the config file**
 
-The installer places `config.yaml.example` in `%APPDATA%\fibutool\`. Copy and rename it:
+The installer places `config.example.yaml` in `%LOCALAPPDATA%\fibutool\`. Copy and rename it:
 
 ```bat
-copy "%APPDATA%\fibutool\config.yaml.example" "%APPDATA%\fibutool\config.yaml"
+copy "%LOCALAPPDATA%\fibutool\config.example.yaml" "%LOCALAPPDATA%\fibutool\config.yaml"
 ```
 
-Then open `%APPDATA%\fibutool\config.yaml` in a text editor.
+Then open `%LOCALAPPDATA%\fibutool\config.yaml` in a text editor.
 
 > **Power users:** A standalone `fibutool-<version>.exe` is also available in the release for manual installation without the setup wizard.
 
@@ -179,7 +179,7 @@ fibutool-process -n 108 --clean --only-payment payments\receipt.pdf --only-invoi
 
 <app directory>/                ← shared across all sessions
   config.yaml                   ← all configuration: API keys, rules, sources, journal workbook path
-                                   default: %APPDATA%\fibutool\config.yaml
+                                   default: %LOCALAPPDATA%\fibutool\config.yaml
 
 <permanent merged directory>/   ← user-maintained archive of all merged PDFs across sessions
                                    configured in config.yaml; used by journal_reader for cross-check
@@ -189,7 +189,7 @@ fibutool-process -n 108 --clean --only-payment payments\receipt.pdf --only-invoi
 
 ## Config reference
 
-Default location: `%APPDATA%\fibutool\config.yaml`.  
+Default location: `%LOCALAPPDATA%\fibutool\config.yaml`.  
 Override with `--config <path>`.
 
 ```yaml
@@ -222,7 +222,7 @@ decimal_separator: ","          # "," for Austrian/German Excel, "." for English
 ig_vat_rate: 20                 # VAT rate used for IG self-assessment (Erwerbsteuer)
 ```
 
-For `fetcher` sources (`gmail_sources`, `filesystem_sources`) and `original_journal` configuration, see the annotated `config.yaml.example` in the repo root or in the release download.
+For `fetcher` sources (`gmail_sources`, `filesystem_sources`) and `original_journal` configuration, see the annotated `config.example.yaml` in the repo root or in the release download.
 
 ---
 
