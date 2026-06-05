@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     * first create a plan and then come back to me.
       * Prefer minimal solutions that keep the system as consistent and reliable as possible.
       * Check the relevant requirements in `requirements/` and flag any conflict or gap before planning.
-      * Check that `config.example.yaml` and `tests/acceptance/fixtures/config.yaml.template` are consistent with the requirements being changed — flag any key that is mentioned in requirements but missing from the example, or any default that contradicts the spec.
+      * Check that `config.example.yaml` and `tests/acceptance/fixtures/config.template.yaml` are consistent with the requirements being changed — flag any key that is mentioned in requirements but missing from the example, or any default that contradicts the spec.
     * After I give the GO, implement the change.
     * Update tests and documentation automatically if necessary.
     * If the change affects behaviour described in `requirements/`, update the relevant requirements file.

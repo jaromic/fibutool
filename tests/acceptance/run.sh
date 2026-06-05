@@ -40,7 +40,7 @@ mkdir -p "$WORKDIR/invoices"
 
 # Substitute API key into config template
 sed "s|\${ANTHROPIC_API_KEY}|${ANTHROPIC_API_KEY}|g" \
-    "$FIXTURES/config.yaml.template" > "$WORKDIR/config.yaml"
+    "$FIXTURES/config.template.yaml" > "$WORKDIR/config.yaml"
 
 # ── Run full pipeline in fresh container ──────────────────────────────────────
 echo "==> Running pipeline..."
