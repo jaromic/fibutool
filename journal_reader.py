@@ -21,6 +21,55 @@ def locate_sheet(wb: openpyxl.Workbook, sheet_name: str):
         )
     return wb[sheet_name]
 
+
+class ColumnMap:
+    """Maps canonical field names to Excel column positions for a specific sheet header."""
+
+    def __init__(self, columns_cfg: dict, header: list[str]) -> None:
+        self._map: dict[str, int] = {}  # field_name → 1-based excel column
+        for field_name, header_name in columns_cfg.items():
+            if not header_name:
+                continue
+            try:
+                self._map[field_name] = header.index(header_name) + 1
+            except ValueError:
+                print(
+                    f"warning — configured column '{header_name}' "
+                    f"(field '{field_name}') not found in sheet header"
+                )
+
+    def _col_index(self, field_name: str) -> int | None:
+        return self._map.get(field_name)
+
+    def get(self, row: tuple, field_name: str):
+        """Return the value for field_name from a data row, or None if not mapped."""
+        col = self._col_index(field_name)
+        return row[col - 1] if col is not None and col - 1 < len(row) else None
+
+    def write_cell(self, ws, row_num: int, field_name: str, value, formats: list) -> None:
+        """Write value to the field's Excel column, copying format from formats[col-1]."""
+        col = self._col_index(field_name)
+        if col is None:
+            return
+        cell = ws.cell(row=row_num, column=col, value=value)
+        if col <= len(formats):
+            cell.number_format, cell.font, cell.fill, cell.border, cell.alignment = formats[col - 1]
+
+
+def build_column_map(cfg: dict, header: list[str]) -> ColumnMap:
+    """Build a ColumnMap from config, preferring columns: over deprecated individual keys."""
+    columns_cfg = cfg.get("columns") or {}
+    if not columns_cfg:
+        columns_cfg = {k: v for k, v in {
+            "year": cfg.get("year_column"),
+            "receipt_number": cfg.get("receipt_number_column"),
+            "payment_date": cfg.get("payment_date_column"),
+            "counterparty": cfg.get("description_column"),
+            "gross_eur": cfg.get("amount_column"),
+        }.items() if v}
+    return ColumnMap(columns_cfg, header)
+
+
 def read_journal_state(config: dict) -> tuple[list, int, int, date]:
     """Read last receipt number and latest payment date from the configured Excel journal.
 
@@ -35,11 +84,6 @@ def read_journal_state(config: dict) -> tuple[list, int, int, date]:
 
     wb_path = Path(cfg["path"]).expanduser()
     sheet_name: str = cfg["sheet"]
-    date_col: str = cfg["payment_date_column"]
-    year_col: str = cfg["year_column"]
-    receipt_col: str = cfg["receipt_number_column"]
-    description_col: str = cfg["description_column"]
-    amount_col: str = cfg["amount_column"]
     merged_dir = Path(cfg["permanent_merged_dir"]).expanduser()
 
     if not wb_path.exists():
@@ -55,7 +99,6 @@ def read_journal_state(config: dict) -> tuple[list, int, int, date]:
     if not rows:
         raise ValueError(f"Sheet '{sheet_name}' is empty")
 
-    # First non-empty row is the header
     header: list[str] | None = None
     data_start = 0
     for i, row in enumerate(rows):
@@ -67,30 +110,35 @@ def read_journal_state(config: dict) -> tuple[list, int, int, date]:
     if header is None:
         raise ValueError(f"Sheet '{sheet_name}' contains no data")
 
-    def col_idx(name: str) -> int:
-        try:
-            return header.index(name)
-        except ValueError:
+    col_map = build_column_map(cfg, header)
+
+    _old_key_map = {
+        "year": "year_column",
+        "receipt_number": "receipt_number_column",
+        "payment_date": "payment_date_column",
+    }
+    columns_cfg = cfg.get("columns") or {}
+    for field in ("year", "receipt_number", "payment_date"):
+        if col_map._col_index(field) is None:
+            header_name = columns_cfg.get(field) or cfg.get(_old_key_map[field])
+            if header_name:
+                raise ValueError(
+                    f"Column '{header_name}' not found in sheet '{sheet_name}' "
+                    f"(columns: {[h for h in header if h]})"
+                )
             raise ValueError(
-                f"Column '{name}' not found in sheet '{sheet_name}' "
-                f"(columns: {[h for h in header if h]})"
+                f"Field '{field}' is not configured — add 'columns.{field}' "
+                f"to original_journal in config.yaml"
             )
 
-    date_idx = col_idx(date_col)
-    year_idx = col_idx(year_col)
-    receipt_idx = col_idx(receipt_col)
-    description_idx = col_idx(description_col)
-    amount_idx = col_idx(amount_col)
-
-    # Parse data rows — skip rows with missing or non-parseable values
-    records: list[tuple[int, int, date]] = []  # (year, receipt_num, payment_date)
+    records: list[tuple[int, int, date]] = []
     entries: list[tuple[int, int, date, str, float]] = []
     for row in rows[data_start:]:
-        year_val = row[year_idx]
-        receipt_val = row[receipt_idx]
-        date_val = row[date_idx]
-        description_val=row[description_idx]
-        amount_val=row[amount_idx] or 0.0
+        year_val = col_map.get(row, "year")
+        receipt_val = col_map.get(row, "receipt_number")
+        date_val = col_map.get(row, "payment_date")
+        description_val = col_map.get(row, "counterparty")
+        amount_val = col_map.get(row, "gross_eur") or 0.0
 
         if year_val is None or receipt_val is None or date_val is None:
             continue
@@ -114,17 +162,13 @@ def read_journal_state(config: dict) -> tuple[list, int, int, date]:
     if not records:
         raise ValueError(f"No valid data rows found in sheet '{sheet_name}'")
 
-    # Last receipt: max year, then max receipt number within that year
     max_year = max(r[0] for r in records)
     year_records = [(y, n, d) for y, n, d in records if y == max_year]
     last_receipt_row = max(year_records, key=lambda r: r[1])
     receipt_number = last_receipt_row[1]
     receipt_row_date = last_receipt_row[2]
-
-    # Latest payment date across all records
     latest_payment_date = max(r[2] for r in records)
 
-    # Both values must come from the same row
     if receipt_row_date != latest_payment_date:
         raise ValueError(
             f"Journal inconsistency: highest receipt {max_year}/{receipt_number:03d} "

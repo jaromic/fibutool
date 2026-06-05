@@ -16,25 +16,34 @@ journal_reader reads the last receipt number and the latest payment date from th
 
 ---
 
-## Configuration (config.yaml additions)
+## Configuration (config.yaml)
+
+journal_reader uses the same `original_journal.columns` section as journal_updater (see `requirements/journal_updater.md` for the full schema). It reads only the three fields it needs:
 
 ```yaml
 original_journal:
   path: "~/Documents/Buchhaltung/Journal.xlsx"   # full path to the Excel workbook
   sheet: "Journal"                                # worksheet name
-  payment_date_column: "Buchungsdatum"            # column header for booking/payment date
-  year_column: "Jahr"                             # column header for the year (integer)
-  receipt_number_column: "Belegnummer"            # column header for receipt number (integer, unique per year)
   permanent_merged_dir: "~/Documents/Buchhaltung/Belege"  # for cross-check
   since_offset_days: 14                           # fetcher --since = last_payment_date - N days (default: 14)
+
+  columns:
+    year: "Jahr"                 # column header for the year (integer)
+    receipt_number: "Belegnummer"  # column header for receipt number (integer, unique per year)
+    payment_date: "Zahlungsdatum"  # column header for booking/payment date
+    # ... all other fields as defined in journal_updater requirements
 ```
+
+The standalone `year_column`, `receipt_number_column`, and `payment_date_column` keys are deprecated. journal_reader reads `columns.year`, `columns.receipt_number`, and `columns.payment_date` instead.
+
+If any of these three keys is absent from `columns`, journal_reader raises `ValueError` and `run.py` falls back to prompting the user for manual entry.
 
 ---
 
 ## Reading logic
 
 - **JR1.1** Open the configured workbook and sheet. Raise `FileNotFoundError` if the workbook does not exist; raise `ValueError` if the sheet is not found.
-- **JR1.2** Treat the first non-empty row as the header. Raise `ValueError` if a configured column name is not found in the header.
+- **JR1.2** Treat the first non-empty row as the header. Look up the column positions for `columns.year`, `columns.receipt_number`, and `columns.payment_date`. Raise `ValueError` if any configured header string is not found in the sheet header.
 - **JR1.3** Parse each data row: extract year (integer), receipt number (integer), and payment date (date). Skip rows where any of these three values is missing or non-parseable.
 - **JR1.4** Raise `ValueError` if no valid data rows are found.
 - **JR1.5** Determine the **last receipt number**: find the maximum year; within that year, find the maximum receipt number. This is the value returned as `last_receipt_number`.
@@ -56,12 +65,12 @@ original_journal:
 ## Public interface
 
 ```python
-def read_journal_state(config: dict) -> tuple[int, date]:
-    """Returns (last_receipt_number, latest_payment_date)."""
+def read_journal_state(config: dict) -> tuple[list, int, int, date]:
+    """Returns (entries, last_receipt_year, last_receipt_number, latest_payment_date)."""
 ```
 
 ---
 
 ## Prospect — future extensions
 
-- Append `journal.csv` output into an existing sheet in the original Excel workbook (see BACKLOG).
+- Append `journal.csv` output into an existing sheet in the original Excel workbook (see journal_updater requirements).

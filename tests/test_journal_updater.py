@@ -13,14 +13,26 @@ HEADERS = ["Jahr", "Belegnr.", "Kategorie", "Datum", "Betrag"]
 YEAR_COL = "Jahr"
 RECEIPT_COL = "Belegnr."
 
+# Column positions in HEADERS (1-based, for assertion clarity)
+COL_YEAR = 1
+COL_RECEIPT = 2
+COL_CATEGORY = 3
+COL_BOOKING_DATE = 4
+COL_GROSS = 5
+
 
 def _make_config(wb_path: Path, sheet: str = SHEET) -> dict:
     return {
         "original_journal": {
             "path": str(wb_path),
             "sheet": sheet,
-            "year_column": YEAR_COL,
-            "receipt_number_column": RECEIPT_COL,
+            "columns": {
+                "year": "Jahr",
+                "receipt_number": "Belegnr.",
+                "category": "Kategorie",
+                "payment_date": "Datum",
+                "gross_eur": "Betrag",
+            },
         }
     }
 
@@ -109,8 +121,7 @@ class TestRunErrors:
         config = {"original_journal": {
             "path": str(tmp_path / "missing.xlsx"),
             "sheet": SHEET,
-            "year_column": YEAR_COL,
-            "receipt_number_column": RECEIPT_COL,
+            "columns": {"year": YEAR_COL, "receipt_number": RECEIPT_COL},
         }}
         with pytest.raises(FileNotFoundError, match="not found"):
             run(config, tmp_path)
@@ -225,7 +236,7 @@ class TestRunHappyPath:
 
         wb = openpyxl.load_workbook(wb_path)
         ws = wb[SHEET]
-        booking_date = ws.cell(row=3, column=5).value  # col 5 = booking date
+        booking_date = ws.cell(row=3, column=COL_BOOKING_DATE).value
         assert not isinstance(booking_date, str)
 
     def test_amount_written_as_number_not_string(self, tmp_path):
@@ -237,7 +248,7 @@ class TestRunHappyPath:
 
         wb = openpyxl.load_workbook(wb_path)
         ws = wb[SHEET]
-        gross = ws.cell(row=3, column=10).value  # col 10 = gross amount
+        gross = ws.cell(row=3, column=COL_GROSS).value
         assert gross == pytest.approx(1993.80)
 
     def test_summary_printed(self, tmp_path, capsys):
@@ -270,3 +281,47 @@ class TestRunHappyPath:
         # Temp must be cleaned up
         tmp = wb_path.parent / (wb_path.stem + ".tmp" + wb_path.suffix)
         assert not tmp.exists()
+
+
+# ── ColumnMap-based write behaviour ──────────────────────────────────────────
+
+class TestRunColumnMap:
+    def test_unconfigured_fields_not_written(self, tmp_path):
+        # Workbook has only 2 columns; all other CSV fields must be silently skipped
+        narrow_headers = ["Jahr", "Belegnr."]
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = SHEET
+        ws.append(narrow_headers)
+        ws.append([2026, "033"])
+        wb_path = tmp_path / "journal.xlsx"
+        wb.save(wb_path)
+
+        _write_csv(tmp_path, [_minimal_csv_row(receipt="034")])
+        config = {"original_journal": {
+            "path": str(wb_path),
+            "sheet": SHEET,
+            "columns": {"year": "Jahr", "receipt_number": "Belegnr."},
+        }}
+        run(config, tmp_path)
+
+        wb = openpyxl.load_workbook(wb_path)
+        row = list(wb[SHEET].iter_rows(values_only=True))[2]  # 3rd row = new entry
+        assert row[0] == 2026        # year written
+        assert row[1] == 34          # receipt_number written
+        assert all(v is None for v in row[2:])  # nothing beyond col 2
+
+    def test_missing_header_in_sheet_emits_warning(self, tmp_path, capsys):
+        wb_path = _make_workbook(tmp_path, [(2026, "033", "Einnahmen", "01.04.2026", "100,00")])
+        _write_csv(tmp_path, [_minimal_csv_row(receipt="034")])
+        config = {"original_journal": {
+            "path": str(wb_path),
+            "sheet": SHEET,
+            "columns": {
+                "year": "Jahr",
+                "receipt_number": "Belegnr.",
+                "gross_eur": "DoesNotExist",  # configured but absent from sheet
+            },
+        }}
+        run(config, tmp_path)
+        assert "DoesNotExist" in capsys.readouterr().out

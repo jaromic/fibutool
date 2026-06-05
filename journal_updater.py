@@ -1,18 +1,27 @@
 """journal_updater — appends journal.csv into the original Excel journal workbook."""
 
 import argparse
+import copy
 import csv
 import shutil
 import sys
-import copy
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
 import yaml
 
-from journal_reader import locate_sheet, open_workbook
+from journal_reader import ColumnMap, build_column_map, locate_sheet, open_workbook
 from shared import default_config_path
+
+
+# Canonical field names in CSV position order (matches journal.py output)
+FIELD_ORDER = [
+    "year", "receipt_number", "category", "detail_category", "payment_date",
+    "counterparty", "col7", "weiterverkauf", "afa", "gross_eur", "gross_anteilig",
+    "anteil_pct", "vat_pct", "vat_eur", "vat_anteilig", "net_eur", "net_anteilig",
+    "vat_deadline", "ig", "est_betrag", "ig_vat_anteilig", "invoice_filename", "payment_filename",
+]
 
 
 # ── CSV column type converters (positional, matching journal.py output order) ─
@@ -86,6 +95,23 @@ def _read_csv(csv_path: Path) -> list[list]:
     return rows
 
 
+def _write_features_warnings(config: dict, col_map: ColumnMap) -> None:
+    if config.get("category_rules") or config.get("position_business_rules"):
+        if col_map._col_index("detail_category") is None:
+            print(
+                "journal_updater: warning — category_rules/position_business_rules configured "
+                "but detail_category column not mapped; detail categories will not be written"
+            )
+    if config.get("business_percentage_rules"):
+        missing = [f for f in ("anteil_pct", "gross_anteilig", "vat_anteilig", "net_anteilig")
+                   if col_map._col_index(f) is None]
+        if missing:
+            print(
+                f"journal_updater: warning — business_percentage_rules configured but "
+                f"{missing} column(s) not mapped; business-share columns will not be written"
+            )
+
+
 def run(config: dict, workdir: Path) -> None:
     """Append journal.csv from workdir into the configured Excel workbook.
 
@@ -97,8 +123,6 @@ def run(config: dict, workdir: Path) -> None:
 
     wb_path = Path(cfg["path"]).expanduser()
     sheet_name: str = cfg["sheet"]
-    year_col_name: str = cfg["year_column"]
-    receipt_col_name: str = cfg["receipt_number_column"]
     csv_path = workdir / "journal.csv"
 
     # J0: journal.csv must exist
@@ -134,7 +158,6 @@ def run(config: dict, workdir: Path) -> None:
     if not all_rows:
         raise ValueError(f"Sheet '{sheet_name}' is empty")
 
-    # Find header row index (0-based)
     header_idx = next(
         (i for i, row in enumerate(all_rows) if any(c is not None for c in row)),
         None,
@@ -143,26 +166,19 @@ def run(config: dict, workdir: Path) -> None:
         raise ValueError(f"Sheet '{sheet_name}' contains no data")
 
     header = [str(c).strip() if c is not None else "" for c in all_rows[header_idx]]
+    col_map = build_column_map(cfg, header)
 
-    # J2.4 prep: locate year column
-    try:
-        year_col_idx = header.index(year_col_name)
-    except ValueError:
-        raise ValueError(
-            f"Year column '{year_col_name}' not found in sheet header "
-            f"(columns: {[h for h in header if h]})"
-        )
+    year_col = col_map._col_index("year")
+    receipt_col = col_map._col_index("receipt_number")
+    if year_col is None:
+        raise ValueError(f"Year column not configured or not found in sheet '{sheet_name}'")
+    if receipt_col is None:
+        raise ValueError(f"Receipt number column not configured or not found in sheet '{sheet_name}'")
+    year_col_idx = year_col - 1      # 0-based for row indexing
+    receipt_col_idx = receipt_col - 1
 
-    # J2.4 prep: locate receipt column
-    try:
-        receipt_col_idx = header.index(receipt_col_name)
-    except ValueError:
-        raise ValueError(
-            f"Receipt column '{receipt_col_name}' not found in sheet header "
-            f"(columns: {[h for h in header if h]})"
-        )
+    _write_features_warnings(config, col_map)
 
-    # J2.2: last data row = last row with a valid receipt number
     last_data_idx = header_idx
     for i, row in enumerate(all_rows[header_idx + 1:], start=header_idx + 1):
         val_year = row[year_col_idx] if year_col_idx < len(row) else None
@@ -175,7 +191,6 @@ def run(config: dict, workdir: Path) -> None:
             except (TypeError, ValueError):
                 pass
 
-    # J2.3: no stray content below last valid data row
     for row in all_rows[last_data_idx + 1:]:
         if any(c is not None for c in row):
             raise ValueError(
@@ -218,6 +233,8 @@ def run(config: dict, workdir: Path) -> None:
     # J3: write to temp copy, then replace original
     last_data_row_num = last_data_idx + 1  # convert to 1-based for openpyxl
     tmp_path = wb_path.parent / (wb_path.stem + ".tmp" + wb_path.suffix)
+    use_column_map = bool(cfg.get("columns"))
+
     try:
         shutil.copy2(wb_path, tmp_path)
 
@@ -225,28 +242,30 @@ def run(config: dict, workdir: Path) -> None:
         try:
             ws = locate_sheet(wb, sheet_name)
 
-            # Read number formats from last data row for format preservation
             formats = [(
                 cell.number_format,
                 copy.copy(cell.font),
                 copy.copy(cell.fill),
                 copy.copy(cell.border),
                 copy.copy(cell.alignment)
-                ) for cell in ws[last_data_row_num]]
+            ) for cell in ws[last_data_row_num]]
 
-            # Append rows at exact positions
             for i, row_values in enumerate(rows_to_append):
                 row_num = last_data_row_num + 1 + i
-                for col_num, value in enumerate(row_values, start=1):
-                    cell = ws.cell(row=row_num, column=col_num, value=value)
-                    if col_num <= len(formats):
-                        cell.number_format, cell.font, cell.fill, cell.border, cell.alignment = formats[col_num - 1]
+                if use_column_map:
+                    for field_pos, field_name in enumerate(FIELD_ORDER):
+                        value = row_values[field_pos] if field_pos < len(row_values) else None
+                        col_map.write_cell(ws, row_num, field_name, value, formats)
+                else:
+                    for col_num, value in enumerate(row_values, start=1):
+                        cell = ws.cell(row=row_num, column=col_num, value=value)
+                        if col_num <= len(formats):
+                            cell.number_format, cell.font, cell.fill, cell.border, cell.alignment = formats[col_num - 1]
 
             wb.save(tmp_path)
         finally:
             wb.close()
 
-        # J3.4: replace original (atomic on POSIX; delete-then-rename on Windows)
         try:
             tmp_path.rename(wb_path)
         except OSError:
@@ -261,14 +280,12 @@ def run(config: dict, workdir: Path) -> None:
                 pass
         raise
 
-    # J3.5: clean up temp if rename left it behind (shouldn't happen)
     if tmp_path.exists():
         try:
             tmp_path.unlink()
         except OSError:
             pass
 
-    # J4: summary
     _print_summary(rows_to_append)
 
 

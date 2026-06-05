@@ -33,12 +33,14 @@ def _make_config(wb_path: Path, merged_dir: Path, sheet: str = "Journal") -> dic
         "original_journal": {
             "path": str(wb_path),
             "sheet": sheet,
-            "payment_date_column": DATE_COL,
-            "year_column": YEAR_COL,
-            "receipt_number_column": RECEIPT_COL,
-            "description_column": RECEIPT_COL,
-            "amount_column": AMOUNT_COL,
             "permanent_merged_dir": str(merged_dir),
+            "columns": {
+                "year": YEAR_COL,
+                "receipt_number": RECEIPT_COL,
+                "payment_date": DATE_COL,
+                "counterparty": DESCRIPTION_COL,
+                "gross_eur": AMOUNT_COL,
+            },
         }
     }
 

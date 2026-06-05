@@ -33,12 +33,32 @@ position_business_rules:
 original_journal:
   path: "C:\\Users\\USERNAME\\Desktop\\fibu\\fibu.xlsm"   # full path to the Excel journal workbook
   sheet: "Journal"                                # worksheet name
-  payment_date_column: "Zahlungsdatum"            # column header for booking/payment date
-  year_column: "Jahr"                             # column header for the year (integer)
-  receipt_number_column: "Belegnummer"            # column header for receipt number (integer, unique per year)
-  description_column: "Bezeichnung"
-  amount_column: "Brutto"
   permanent_merged_dir: "C:\\Users\\USERNAME\\Desktop\\fibu\\Journal_Belege"  # archive of all merged PDFs (new merged receipts will be copied there)
+
+  columns:                        # maps our field names → your Excel column headers; omit a line to skip that field
+    year: "Jahr"
+    receipt_number: "Belegnummer"
+    category: "Buchungstyp"
+    detail_category: "Kategorie"
+    payment_date: "Buchungsdatum"
+    counterparty: "Auftraggeber/Empfänger"
+    # col7: ""                    # always-empty spacer column; omit if not present
+    # weiterverkauf: ""           # always-empty; omit if not present
+    afa: "AfA"
+    gross_eur: "Brutto EUR"
+    gross_anteilig: "Brutto antlg."
+    anteil_pct: "Anteil"
+    vat_pct: "USt %"
+    vat_eur: "USt EUR"
+    vat_anteilig: "USt antlg."
+    net_eur: "Netto EUR"
+    net_anteilig: "Netto antlg."
+    vat_deadline: "UVA Frist"
+    ig: "IG"
+    # est_betrag: ""              # always-empty; omit if not present
+    ig_vat_anteilig: "IG USt antlg."
+    invoice_filename: "Eingangsrechnung"
+    payment_filename: "Bankbeleg"
 
 fetcher:
   filesystem_sources:
