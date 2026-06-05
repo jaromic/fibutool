@@ -31,30 +31,30 @@ original_journal:
   path: "/workdir/before.xlsx"
   sheet: "Journal"
   permanent_merged_dir: "/workdir/permanent_merged"
-  columns:                        # maps our field names → your Excel column headers; omit a line to skip that field
+  columns:
     year: "Jahr"
     receipt_number: "Belegnummer"
-    category: "Buchungstyp"
-    detail_category: "Kategorie"
+    category: "Kategorie"
+    detail_category: "Detailkategorie"
     payment_date: "Buchungsdatum"
-    counterparty: "Auftraggeber/Empfänger"
-    # col7: ""                    # always-empty spacer column; omit if not present
-    # weiterverkauf: ""           # always-empty; omit if not present
+    counterparty: "Bezeichnung"
+    col7: "Kennung"
+    weiterverkauf: "Weiterverkauf"
     afa: "AfA"
-    gross_eur: "Brutto EUR"
+    gross_eur: "Brutto"
     gross_anteilig: "Brutto antlg."
     anteil_pct: "Anteil"
-    vat_pct: "USt %"
-    vat_eur: "USt EUR"
-    vat_anteilig: "USt antlg."
-    net_eur: "Netto EUR"
+    vat_pct: "MwSt %"
+    vat_eur: "MwSt"
+    vat_anteilig: "MwSt antlg."
+    net_eur: "Netto"
     net_anteilig: "Netto antlg."
-    vat_deadline: "UVA Frist"
+    vat_deadline: "MwSt Frist"
     ig: "IG"
-    # est_betrag: ""              # always-empty; omit if not present
-    ig_vat_anteilig: "IG USt antlg."
-    invoice_filename: "Eingangsrechnung"
-    payment_filename: "Bankbeleg"
+    est_betrag: "ESt Betrag"
+    ig_vat_anteilig: "IG MwSt antlg."
+    invoice_filename: "Rechnung"
+    payment_filename: "Beleg"
 
 fetcher:
   filesystem_sources:
