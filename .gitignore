@@ -30,3 +30,5 @@ CLAUDE.local.md
 # OAuth user tokens (personal, never commit)
 /fetcher*.json
 /token*.json
+
+/production/
