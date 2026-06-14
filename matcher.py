@@ -14,14 +14,28 @@ Given a list of payments and a list of invoices, return the optimal 1-to-1 assig
 Each invoice may be assigned to at most one payment; each payment gets at most one invoice.
 
 Matching criteria (in order of importance):
-1. Company name: the most reliable signal. Allow abbreviations, GmbH/Ltd/OG variants, partial name
-   matches, and minor spelling differences.
+1. Company name: use your world knowledge to resolve merchant descriptors to legal company names
+   (e.g. "CLAUDE.AI SUBSCRIPTION" → Anthropic, "OPENAI *CHATGPT SUBSCR" → OpenAI). Allow
+   abbreviations, GmbH/Ltd/OG variants, partial name matches, and minor spelling differences.
+   Name is the primary tiebreaker when multiple invoices otherwise qualify, not a hard gate.
 2. Date: invoice date should be 0–21 days before booking date; occasionally wider gaps are acceptable.
-3. Amount: the difference of payment amount and invoice amount must be < 1 EUR. Exception: Disregard amounts 
-   for foreign currency invoices (payment is in EUR). And note the currency difference in the reason.
+   Per-counterparty overrides may be provided in the "Date window overrides" section below — use
+   those windows for matching counterparties that match the keyword (case-insensitive substring).
+3. Amount:
+   - If the payment has a foreign_amount and foreign_currency, compare those against the invoice
+     amount when the invoice is in that currency (e.g. foreign_amount 24.00 USD matches a USD
+     invoice for 24.00). The EUR payment amount cannot be compared to a foreign-currency invoice.
+   - Otherwise: the difference between payment amount and invoice amount must be < 1 EUR.
+   - A EUR amount difference > 1 EUR is a hard disqualifier — do not match regardless of how
+     well name and date fit.
+   - Note any currency difference in the reason.
 4. Direction:
    - outgoing payment (we paid) → match "incoming_invoice" only
    - incoming payment (we received) → match "outgoing_invoice" or "credit_note"
+
+When amount difference < 0.01 (in the relevant currency), date is within range, and direction
+matches, and only one invoice candidate satisfies all three — match it even if the counterparty
+names are unrelated, and note the name discrepancy in the reason.
 
 Return a JSON array with one entry per payment, in the same order as the input payments list:
 [
@@ -40,6 +54,7 @@ def match_payments(
     invoices: list[InvoiceInfo],
     client: anthropic.Anthropic,
     workdir: Path = Path("."),
+    payment_terms_days: dict[str, int] | None = None,
 ) -> list[MatchResult]:
     if not invoices:
         return [
@@ -61,6 +76,8 @@ def match_payments(
                 "currency": p.currency,
                 "counterparty": p.counterparty,
                 "direction": p.direction,
+                **({"foreign_amount": str(p.foreign_amount), "foreign_currency": p.foreign_currency}
+                   if p.foreign_amount is not None else {}),
             }
             for i, p in enumerate(payments)
         ],
@@ -85,6 +102,11 @@ def match_payments(
         indent=2,
     )
 
+    overrides_section = ""
+    if payment_terms_days:
+        overrides_json = json.dumps(payment_terms_days, ensure_ascii=False)
+        overrides_section = f"\nDate window overrides (keyword → max days, substring match on counterparty):\n{overrides_json}\n"
+
     response = call_with_retry(lambda: client.messages.create(
         model="claude-opus-4-7",
         max_tokens=4096,
@@ -100,7 +122,8 @@ def match_payments(
                 "role": "user",
                 "content": (
                     f"Payments:\n{payments_json}\n\n"
-                    f"Invoices:\n{invoices_json}\n\n"
+                    f"Invoices:\n{invoices_json}\n"
+                    f"{overrides_section}\n"
                     "Return JSON array only."
                 ),
             }

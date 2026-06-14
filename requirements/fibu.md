@@ -78,6 +78,7 @@ Input directories (`payments/`, `invoices/`) are populated by the user before ru
 | `category_rules` | dict[str→str] | {} | Maps counterparty name substrings (case-insensitive) to detail categories |
 | `business_percentage_rules` | dict[str→float] | {} | Maps counterparty name substrings to business-use percentage (1–100) |
 | `position_business_rules` | dict[str→spec] | {} | Maps counterparty name substrings to position-level business keyword classification |
+| `payment_terms_days` | dict[str→int] | {} | Maps counterparty name substrings to maximum days between invoice date and booking date (default: 21); use for suppliers with long payment terms |
 
 All string matches against counterparty names are **case-insensitive substrings**.
 
@@ -100,6 +101,8 @@ One API call per payment receipt PDF.
   - minus sign → `"outgoing"` (we paid)
   - no minus sign / positive → `"incoming"` (we received, including refunds)
 - `forex_fee` — Fremdwährungsentgelt if shown separately, else 0
+- `foreign_amount` — original order amount in the transaction currency (Auftragsbetrag) if the payment was settled in a foreign currency (e.g. USD); null for EUR payments
+- `foreign_currency` — 3-letter code for `foreign_amount`; null if `foreign_amount` is null
 
 **Post-extraction rules:**
 - R1.1 If direction is not `"outgoing"` and the counterparty contains one of `own_company_names`: confirm direction as `"incoming"`. (A payment can be labelled with our own account name yet still be an incoming credit.)
@@ -161,12 +164,14 @@ One API call per invoice document PDF.
 One API call for the entire batch (all payments × all invoices).
 
 **Criteria (in order of importance):**
-1. **Company name** — most reliable signal; allow abbreviations, GmbH/Ltd/OG variants, partial matches, minor spelling differences.
-2. **Date** — invoice date should be 0–21 days before booking date; wider gaps occasionally acceptable.
-3. **Amount** — payment amount and invoice amount must differ by < 1 EUR. For foreign-currency invoices (invoice currency ≠ EUR) disregard amount; note the currency difference in the reason.
+1. **Company name** — use world knowledge to resolve merchant descriptors to legal company names (e.g. "CLAUDE.AI SUBSCRIPTION" → Anthropic). Allow abbreviations, GmbH/Ltd/OG variants, partial matches, minor spelling differences. Name is the primary tiebreaker when multiple invoices otherwise qualify, not a hard gate.
+2. **Date** — invoice date should be 0–21 days before booking date; wider gaps occasionally acceptable. Per-counterparty overrides configured in `payment_terms_days` (keyword → max days, substring match) extend the window for suppliers with long payment terms.
+3. **Amount** — if the payment has `foreign_amount`/`foreign_currency`, compare those against the invoice amount when the invoice is in that currency; the EUR amount cannot be compared to a foreign-currency invoice. Otherwise the payment amount and invoice amount must differ by < 1 EUR. A EUR amount difference > 1 EUR is a hard disqualifier regardless of other signals. Note any currency difference in the reason.
 4. **Direction** — strict:
    - outgoing payment → match `incoming_invoice` only
    - incoming payment → match `outgoing_invoice` or `credit_note` only
+
+When amount difference < 0.01 (in the relevant currency), date is within range, and direction matches, and only one invoice candidate satisfies all three — match regardless of name similarity and note the name discrepancy in the reason.
 
 **Assignment rules:**
 - R3.1 Each invoice is assigned to at most one payment.

@@ -56,6 +56,7 @@ def _invoice_from_dict(d: dict) -> InvoiceInfo:
 
 
 def _payment_from_dict(d: dict) -> PaymentInfo:
+    raw_foreign = d.get("foreign_amount")
     return PaymentInfo(
         booking_date=date.fromisoformat(d["booking_date"]),
         amount=Decimal(d["amount"]),
@@ -63,6 +64,8 @@ def _payment_from_dict(d: dict) -> PaymentInfo:
         counterparty=d["counterparty"],
         direction=d["direction"],
         forex_fee=Decimal(d.get("forex_fee", "0")),
+        foreign_amount=Decimal(raw_foreign) if raw_foreign is not None else None,
+        foreign_currency=d.get("foreign_currency"),
         pdf_path=_path(d["pdf_path"]),
         address=d.get("address"),
         ordered_path=_path(d["ordered_path"]) if d.get("ordered_path") else None,

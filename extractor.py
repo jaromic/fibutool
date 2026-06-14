@@ -26,7 +26,10 @@ Fields:
     minus sign on the amount → "outgoing" (we paid / debit)
     no minus sign / positive amount → "incoming" (we received / credit, including refunds)
 - forex_fee: foreign currency fee (Fremdwährungsentgelt) as a positive decimal string if shown
-  separately on the receipt, otherwise "0"\
+  separately on the receipt, otherwise "0"
+- foreign_amount: original order amount in the foreign currency (Auftragsbetrag) as a positive
+  decimal string if the payment was settled in a currency other than EUR (e.g. "24.00"), otherwise null
+- foreign_currency: 3-letter currency code of the foreign_amount (e.g. "USD"), otherwise null\
 """
 
 DETAIL_CATEGORIES = [
@@ -67,6 +70,11 @@ def validate_category_rules(rules: dict[str, str]) -> None:
             f"category_rules contains unknown categories:\n{lines}\n\nValid categories:\n{valid}"
         )
 
+def validate_payment_terms_days(rules: dict[str, int]) -> None:
+    invalid = {k: v for k, v in rules.items() if not isinstance(v, int) or v <= 0}
+    if invalid:
+        lines = "\n".join(f"  {k!r}: {v}" for k, v in invalid.items())
+        raise ValueError(f"payment_terms_days values must be numbers greater than 0:\n{lines}")
 
 INVOICE_SYSTEM_PROMPT = """\
 You extract structured data from invoice PDFs.
@@ -375,6 +383,8 @@ def extract_payment_info(
         counterparty=counterparty,
         direction=direction,
         forex_fee=_parse_amount(data.get("forex_fee", "0")),
+        foreign_amount=_parse_amount(str(data["foreign_amount"])) if data.get("foreign_amount") else None,
+        foreign_currency=data["foreign_currency"].upper() if data.get("foreign_currency") else None,
         pdf_path=pdf_path,
     )
 

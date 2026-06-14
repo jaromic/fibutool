@@ -27,6 +27,8 @@ class PaymentInfo:
     ordered_path: Optional[Path] = None
     receipt_number: Optional[int] = None
     forex_fee: Decimal = field(default_factory=lambda: Decimal("0"))
+    foreign_amount: Optional[Decimal] = None
+    foreign_currency: Optional[str] = None
 
 
 @dataclass

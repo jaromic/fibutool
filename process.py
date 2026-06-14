@@ -25,6 +25,7 @@ from extractor import (
     extract_invoice_info,
     extract_payment_info,
     validate_category_rules,
+    validate_payment_terms_days,
     validate_business_percentage_rules,
     validate_position_business_rules,
     validate_extracted_positions,
@@ -155,6 +156,7 @@ def _load_config(config_path: Path) -> dict:
 def _validate_config(config: dict) -> None:
     try:
         validate_category_rules(config.get("category_rules", {}))
+        validate_payment_terms_days(config.get("payment_terms_days", {}))
         validate_business_percentage_rules(config.get("business_percentage_rules", {}))
         validate_position_business_rules(config.get("position_business_rules", {}))
     except ValueError as e:
@@ -211,6 +213,7 @@ def _full_mode(
     category_rules: dict = config.get("category_rules", {})
     business_percentage_rules: dict = config.get("business_percentage_rules", {})
     position_business_rules: dict = config.get("position_business_rules", {})
+    payment_terms_days: dict = config.get("payment_terms_days", {})
 
     if args.only_payment:
         if not args.only_payment.exists():
@@ -278,7 +281,7 @@ def _full_mode(
         print("Warning: no invoices could be extracted — all payments will be unmatched.", file=sys.stderr)
 
     print("  Matching payments to invoices...")
-    results = match_payments(sorted_payments, invoices, client, workdir)
+    results = match_payments(sorted_payments, invoices, client, workdir, payment_terms_days)
     for result in results:
         if result.invoice:
             result.business_percentage = apply_percentage_rules(
@@ -301,6 +304,7 @@ def _resume_mode(
     category_rules: dict = config.get("category_rules", {})
     business_percentage_rules: dict = config.get("business_percentage_rules", {})
     position_business_rules: dict = config.get("position_business_rules", {})
+    payment_terms_days: dict = config.get("payment_terms_days", {})
 
     print(f"Resume mode — loading previous results from {match_cache_path}")
     prev_results = load_results(match_cache_path)
@@ -327,7 +331,7 @@ def _resume_mode(
         already_matched_names = {r.invoice.pdf_path.name for r in prev_results if r.invoice is not None}
         available_invoices = [inv for inv in all_invoices if inv.pdf_path.name not in already_matched_names]
         print(f"  Re-matching {len(unmatched)} previously unmatched payment(s) against {len(available_invoices)} available invoice(s)...")
-        rematched = match_payments([r.payment for r in unmatched], available_invoices, client, workdir)
+        rematched = match_payments([r.payment for r in unmatched], available_invoices, client, workdir, payment_terms_days)
         for result in rematched:
             if result.invoice:
                 result.business_percentage = apply_percentage_rules(

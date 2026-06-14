@@ -18,6 +18,11 @@ category_rules:
   Sozialversicherungsanstalt: "Pflichtversicherungsbeiträge"
   Hetzner: "sonstige Betriebsausgaben"
 
+# keyword → max days between invoice date and payment booking date (default: 21)
+# Use for suppliers with long payment terms to avoid wrong-month matches
+payment_terms_days:
+  Contractus: 60
+
 # keyword → % of expense that is business use (substring match on counterparty name)
 business_percentage_rules:
   Kabelkanal: 66.6667
