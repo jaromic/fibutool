@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -130,3 +130,65 @@ def test_out_of_range_invoice_index(client, tmp_path):
         results = match_payments(payments, invoices, client, workdir=tmp_path)
     assert results[0].invoice is None
     assert "wrong index" in results[0].warnings[0]
+
+
+def _make_mock_client(llm_json: str):
+    """Client whose messages.create returns a fake LLM response."""
+    mock_create = MagicMock(return_value=fake_response(llm_json))
+    return SimpleNamespace(messages=SimpleNamespace(create=mock_create)), mock_create
+
+
+def _user_content(mock_create) -> str:
+    return mock_create.call_args.kwargs["messages"][0]["content"]
+
+
+def test_forex_payment_includes_foreign_fields_in_payload(tmp_path):
+    llm_json = json.dumps([{"payment_index": 0, "invoice_index": 0, "reason": "forex"}])
+    client, mock_create = _make_mock_client(llm_json)
+    payment = PaymentInfo(
+        booking_date=date(2026, 5, 26),
+        amount=Decimal("21.03"),
+        currency="EUR",
+        counterparty="OpenAI",
+        direction="outgoing",
+        pdf_path=Path("pay.pdf"),
+        foreign_amount=Decimal("24.00"),
+        foreign_currency="USD",
+    )
+    with patch("matcher.call_with_retry", side_effect=lambda fn: fn()):
+        match_payments([payment], [make_invoice("inv.pdf")], client, workdir=tmp_path)
+    content = _user_content(mock_create)
+    assert '"foreign_amount": "24.00"' in content
+    assert '"foreign_currency": "USD"' in content
+
+
+def test_eur_payment_omits_foreign_fields_from_payload(tmp_path):
+    llm_json = json.dumps([{"payment_index": 0, "invoice_index": 0, "reason": "eur match"}])
+    client, mock_create = _make_mock_client(llm_json)
+    with patch("matcher.call_with_retry", side_effect=lambda fn: fn()):
+        match_payments([make_payment("pay.pdf")], [make_invoice("inv.pdf")], client, workdir=tmp_path)
+    assert "foreign_amount" not in _user_content(mock_create)
+
+
+def test_payment_terms_days_appended_to_user_message(tmp_path):
+    llm_json = json.dumps([{"payment_index": 0, "invoice_index": None, "reason": "no match"}])
+    client, mock_create = _make_mock_client(llm_json)
+    with patch("matcher.call_with_retry", side_effect=lambda fn: fn()):
+        match_payments(
+            [make_payment("pay.pdf")], [make_invoice("inv.pdf")], client,
+            workdir=tmp_path, payment_terms_days={"Hays": 60},
+        )
+    content = _user_content(mock_create)
+    assert "Date window overrides" in content
+    assert '"Hays": 60' in content
+
+
+def test_empty_payment_terms_days_omits_overrides_section(tmp_path):
+    llm_json = json.dumps([{"payment_index": 0, "invoice_index": 0, "reason": "matched"}])
+    client, mock_create = _make_mock_client(llm_json)
+    with patch("matcher.call_with_retry", side_effect=lambda fn: fn()):
+        match_payments(
+            [make_payment("pay.pdf")], [make_invoice("inv.pdf")], client,
+            workdir=tmp_path, payment_terms_days={},
+        )
+    assert "Date window overrides" not in _user_content(mock_create)

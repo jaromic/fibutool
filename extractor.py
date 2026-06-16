@@ -74,7 +74,7 @@ def validate_payment_terms_days(rules: dict[str, int]) -> None:
     invalid = {k: v for k, v in rules.items() if not isinstance(v, int) or v <= 0}
     if invalid:
         lines = "\n".join(f"  {k!r}: {v}" for k, v in invalid.items())
-        raise ValueError(f"payment_terms_days values must be numbers greater than 0:\n{lines}")
+        raise ValueError(f"payment_terms_days values must be positive integers:\n{lines}")
 
 INVOICE_SYSTEM_PROMPT = """\
 You extract structured data from invoice PDFs.

@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from unittest.mock import patch
+
 from extractor import (
     _apply_category_rules,
     _apply_position_business_rules,
@@ -13,7 +15,9 @@ from extractor import (
     _parse_json,
     _parse_positions,
     apply_percentage_rules,
+    extract_payment_info,
     validate_extracted_positions,
+    validate_payment_terms_days,
     validate_position_business_rules,
 )
 from models import InvoiceInfo, InvoicePosition
@@ -224,6 +228,68 @@ class TestValidateExtractedPositions:
         positions = [_make_pos("80.00", "16.67", "100.00")]
         invoice = _make_invoice(positions, "100.00")
         assert "test.pdf" in validate_extracted_positions(invoice)[0]
+
+
+class TestExtractPaymentInfo:
+    BASE = {
+        "booking_date": "2026-05-26",
+        "amount": "21.03",
+        "currency": "EUR",
+        "counterparty": "OpenAI",
+        "direction": "outgoing",
+        "forex_fee": "0.31",
+    }
+
+    def test_forex_payment_parses_foreign_fields(self, tmp_path):
+        llm_data = {**self.BASE, "foreign_amount": "24.00", "foreign_currency": "USD"}
+        with patch("extractor._call_claude", return_value=llm_data):
+            result = extract_payment_info(tmp_path / "pay.pdf", client=None,
+                                          own_company_names=[], workdir=tmp_path)
+        assert result.foreign_amount == Decimal("24.00")
+        assert result.foreign_currency == "USD"
+
+    def test_eur_payment_has_no_foreign_fields(self, tmp_path):
+        llm_data = {**self.BASE, "foreign_amount": None, "foreign_currency": None}
+        with patch("extractor._call_claude", return_value=llm_data):
+            result = extract_payment_info(tmp_path / "pay.pdf", client=None,
+                                          own_company_names=[], workdir=tmp_path)
+        assert result.foreign_amount is None
+        assert result.foreign_currency is None
+
+    def test_foreign_fields_absent_from_llm_response(self, tmp_path):
+        with patch("extractor._call_claude", return_value=self.BASE):
+            result = extract_payment_info(tmp_path / "pay.pdf", client=None,
+                                          own_company_names=[], workdir=tmp_path)
+        assert result.foreign_amount is None
+        assert result.foreign_currency is None
+
+
+class TestValidatePaymentTermsDays:
+    def test_valid_rules_pass(self):
+        validate_payment_terms_days({"Hays": 60, "Contractus": 45})
+
+    def test_empty_rules_pass(self):
+        validate_payment_terms_days({})
+
+    def test_zero_raises(self):
+        with pytest.raises(ValueError, match="positive integers"):
+            validate_payment_terms_days({"Hays": 0})
+
+    def test_negative_raises(self):
+        with pytest.raises(ValueError, match="positive integers"):
+            validate_payment_terms_days({"Hays": -10})
+
+    def test_float_raises(self):
+        with pytest.raises(ValueError, match="positive integers"):
+            validate_payment_terms_days({"Hays": 60.5})
+
+    def test_string_raises(self):
+        with pytest.raises(ValueError, match="positive integers"):
+            validate_payment_terms_days({"Hays": "sixty"})
+
+    def test_error_message_includes_key_and_value(self):
+        with pytest.raises(ValueError, match="Hays.*0"):
+            validate_payment_terms_days({"Hays": 0})
 
 
 class TestValidatePositionBusinessRules:
