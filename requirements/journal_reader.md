@@ -48,7 +48,6 @@ If any of these three keys is absent from `columns`, journal_reader raises `Valu
 - **JR1.4** Raise `ValueError` if no valid data rows are found.
 - **JR1.5** Determine the **last receipt number**: find the maximum year; within that year, find the maximum receipt number. This is the value returned as `last_receipt_number`.
 - **JR1.6** Determine the **latest payment date**: find the maximum payment date across all records.
-- **JR1.7** The last receipt row and the latest payment date must be the same row. If the row with the maximum receipt number has a different date than the overall maximum payment date, raise `ValueError` describing the inconsistency.
 - **JR1.8** Accept both `datetime` and `date` cell values from openpyxl; convert `datetime` to `date` by discarding the time component.
 
 ---

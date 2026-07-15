@@ -151,17 +151,6 @@ class TestReadJournalState:
         with pytest.raises(ValueError, match="No valid data rows"):
             read_journal_state(_make_config(wb, merged))
 
-    def test_inconsistent_row_raises(self, tmp_path):
-        # Row with max receipt does not have max date
-        merged = tmp_path / "merged"
-        merged.mkdir()
-        wb = _make_workbook(tmp_path, [
-            (2026, 10, date(2026, 1, 1)),   # max receipt but old date
-            (2026, 9,  date(2026, 6, 1)),   # max date but lower receipt
-        ])
-        with pytest.raises(ValueError, match="inconsistency"):
-            read_journal_state(_make_config(wb, merged))
-
     def test_multiple_years_uses_latest_year_only(self, tmp_path):
         merged = tmp_path / "merged"
         merged.mkdir()
