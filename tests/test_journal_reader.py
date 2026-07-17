@@ -179,6 +179,18 @@ class TestReadJournalState:
         entries,_,_,_ = read_journal_state(_make_config(wb, merged))
         assert entries != []
 
+    def test_nacherfassung_case(self, tmp_path):
+        merged = tmp_path / "merged"
+        merged.mkdir()
+        _write_merged_file(merged, 101, 2026, month=1)
+        _write_merged_file(merged, 99, 2026, month=6)
+        _wb = _make_workbook(tmp_path, [
+            (2026, 99, date(2026, 6, 1)),
+            (2026, 101, date(2026, 1, 1)),
+        ])
+        entries,_,_,latest_payment_date = read_journal_state(_make_config(_wb, merged))
+        assert latest_payment_date == date(2026, 6, 1)
+
 
 # ── _cross_check_merged_dir ───────────────────────────────────────────────────
 

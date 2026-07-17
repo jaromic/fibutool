@@ -6,13 +6,13 @@ journal_reader reads the last receipt number and the latest payment date from th
 
 ## Glossary
 
-| Term | Meaning |
-|---|---|
-| Original journal | An external Excel workbook (.xlsx) maintained by the user across all bookkeeping sessions |
-| Last receipt number | The highest receipt number (NNN) in the latest year present in the journal |
-| Latest payment date | The booking date on the same row as the last receipt number |
+| Term | Meaning                                                                                             |
+|---|-----------------------------------------------------------------------------------------------------|
+| Original journal | An external Excel workbook (.xlsx) maintained by the user across all bookkeeping sessions           |
+| Last receipt number | The highest receipt number (NNN) in the latest year present in the journal                          |
+| Latest payment date | The maximum payment date across all records                                                         |
 | Permanent merged dir | An archive directory where the user stores all merged PDFs across sessions; used for cross-checking |
-| Since date | The fetcher `--since` date, computed as `latest_payment_date - since_offset_days` |
+| Since date | The fetcher `--since` date, computed as `latest_payment_date - since_offset_days`                   |
 
 ---
 

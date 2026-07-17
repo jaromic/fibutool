@@ -167,7 +167,7 @@ def read_journal_state(config: dict) -> tuple[list, int, int, date]:
     last_receipt_row = max(year_records, key=lambda r: r[1])
     receipt_number = last_receipt_row[1]
     receipt_row_date = last_receipt_row[2]
-    latest_payment_date = receipt_row_date
+    latest_payment_date = max(r[2] for r in records)
 
     _cross_check_merged_dir(merged_dir, max_year, receipt_number)
 
