@@ -23,18 +23,30 @@ import json
 import os.path
 import os
 import sys
+import time as time_module
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 import keyring
 import yaml
 
-from shared import default_config_path, setup_logging
+from shared import default_config_path, prompt_arc, setup_logging
 
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 IMAP_KEYRING_SERVICE = "fibutool-fetcher"
 _IMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+# Gmail batch API allows up to 100 calls per batch; keep some margin.
+GMAIL_BATCH_SIZE = 50
+# 'Total Query Cost' is a fixed per-minute bucket — once exhausted, waiting
+# longer within the same minute does not help, so retries are spaced by the
+# window size rather than growing exponentially.
+_QUOTA_RETRY_DELAY_SECONDS = 60
+_QUOTA_MAX_ATTEMPTS = 3
+# Transient server errors (5xx) are unrelated to the quota bucket and often
+# clear within seconds, so a classic exponential backoff applies here.
+_TRANSIENT_BACKOFF_SECONDS = [1, 2, 4, 8, 16]
 
 
 # ── Seen registry ─────────────────────────────────────────────────────────────
@@ -157,7 +169,138 @@ def _authenticate_gmail(client_secret_file: Path, token_file: Path):
     return build("gmail", "v1", credentials=creds)
 
 
-def _list_messages(service, folder: str, query: str) -> list[dict]:
+def _error_kind(e: Exception) -> str | None:
+    """Classify a Gmail API error as 'quota', 'transient', or None (not retryable)."""
+    from googleapiclient.errors import HttpError
+
+    if not isinstance(e, HttpError) or e.resp is None:
+        return None
+    status = e.resp.status
+    if status == 429:
+        return "quota"
+    if status == 403:
+        try:
+            content = e.content.decode() if isinstance(e.content, bytes) else e.content
+            reason = json.loads(content)["error"]["errors"][0]["reason"]
+        except Exception:
+            reason = None
+        if reason in ("rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"):
+            return "quota"
+        return None
+    if status in (500, 502, 503):
+        return "transient"
+    return None
+
+
+def _retry_schedule(kind: str) -> list[int]:
+    if kind == "quota":
+        return [_QUOTA_RETRY_DELAY_SECONDS] * _QUOTA_MAX_ATTEMPTS
+    return _TRANSIENT_BACKOFF_SECONDS
+
+
+def _call_with_retry(fn, label: str):
+    """Call fn(), retrying on quota/transient Gmail API errors.
+
+    On retry exhaustion, prompts abort/retry/continue: retry resets the
+    backoff and tries again, abort exits the process, continue re-raises the
+    original error for the caller to record as a warning (existing behaviour).
+    """
+    attempt = 0
+    while True:
+        try:
+            return fn()
+        except Exception as e:
+            kind = _error_kind(e)
+            if kind is None:
+                raise
+            attempt += 1
+            schedule = _retry_schedule(kind)
+            if attempt <= len(schedule):
+                delay = schedule[attempt - 1]
+                print(f"  [{label}] {kind} error, retrying in {delay}s (attempt {attempt}/{len(schedule)}): {e}")
+                time_module.sleep(delay)
+                continue
+            choice = prompt_arc(f"fetcher: {label}")
+            if choice == "retry":
+                attempt = 0
+                continue
+            if choice == "abort":
+                sys.exit(1)
+            raise  # continue — caller records the original error as a warning
+
+
+def _chunks(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+def _batched_get(service, ids: list[str], label: str, **request_kwargs) -> tuple[dict, dict]:
+    """Fetch service.users().messages().get(id=..., **request_kwargs) for each id via
+    the Gmail batch API. Returns (responses, errors), both keyed by id.
+
+    Retries the subset of ids that failed with a quota/transient error, using the
+    same backoff-then-prompt behaviour as _call_with_retry, applied once per round
+    to the whole failing batch rather than per id.
+    """
+    pending = list(ids)
+    responses: dict[str, dict] = {}
+    errors: dict[str, Exception] = {}
+    attempt = 0
+
+    while pending:
+        round_errors: dict[str, Exception] = {}
+
+        def callback(request_id, response, exception, _round_errors=round_errors):
+            if exception is not None:
+                _round_errors[request_id] = exception
+            else:
+                responses[request_id] = response
+
+        for chunk in _chunks(pending, GMAIL_BATCH_SIZE):
+            batch = service.new_batch_http_request()
+            for msg_id in chunk:
+                batch.add(
+                    service.users().messages().get(userId="me", id=msg_id, **request_kwargs),
+                    callback=callback, request_id=msg_id,
+                )
+            batch.execute()
+
+        kinds = {mid: _error_kind(e) for mid, e in round_errors.items()}
+        for mid, k in kinds.items():
+            if k is None:
+                errors[mid] = round_errors[mid]
+
+        retryable_ids = [mid for mid, k in kinds.items() if k is not None]
+        if not retryable_ids:
+            break
+
+        attempt += 1
+        kind = "quota" if any(kinds[mid] == "quota" for mid in retryable_ids) else "transient"
+        schedule = _retry_schedule(kind)
+
+        if attempt <= len(schedule):
+            delay = schedule[attempt - 1]
+            print(f"  [{label}] {kind} error on {len(retryable_ids)} message(s), "
+                  f"retrying in {delay}s (attempt {attempt}/{len(schedule)})")
+            time_module.sleep(delay)
+            pending = retryable_ids
+            continue
+
+        choice = prompt_arc(f"fetcher: {label} ({len(retryable_ids)} message(s))")
+        if choice == "retry":
+            attempt = 0
+            pending = retryable_ids
+            continue
+        if choice == "abort":
+            sys.exit(1)
+        for mid in retryable_ids:  # continue — record as warnings, stop retrying
+            errors[mid] = round_errors[mid]
+        break
+
+    return responses, errors
+
+
+def _list_messages(service, folder: str, query: str, label: str = "?") -> list[dict]:
     """Return all message stubs matching query in folder, handling pagination."""
     results = []
     page_token = None
@@ -165,7 +308,10 @@ def _list_messages(service, folder: str, query: str) -> list[dict]:
         kwargs: dict = dict(userId="me", q=f"in:{folder} {query}", maxResults=500)
         if page_token:
             kwargs["pageToken"] = page_token
-        response = service.users().messages().list(**kwargs).execute()
+        response = _call_with_retry(
+            lambda kwargs=kwargs: service.users().messages().list(**kwargs).execute(),
+            f"{label} search",
+        )
         results.extend(response.get("messages", []))
         page_token = response.get("nextPageToken")
         if not page_token:
@@ -340,24 +486,27 @@ def _process_gmail_source(
         print(f"  [{folder}] query: {query}")
 
         try:
-            messages = _list_messages(service, folder, query)
+            messages = _list_messages(service, folder, query, label)
         except Exception as e:
             warnings.append(f"[fetcher/{label}] failed to search {folder}: {e}")
             continue
 
         print(f"  {len(messages)} message(s) returned")
 
-        filter_skipped = 0
-        for msg_stub in messages:
-            msg_id = msg_stub["id"]
+        msg_ids = [m["id"] for m in messages]
+        metadata_responses, metadata_errors = _batched_get(
+            service, msg_ids, f"{label} metadata fetch",
+            format="metadata", metadataHeaders=["From", "Subject"],
+        )
+        for msg_id, e in metadata_errors.items():
+            warnings.append(f"[fetcher/{label}] failed to fetch metadata for {msg_id}: {e}")
 
-            try:
-                meta = service.users().messages().get(
-                    userId="me", id=msg_id, format="metadata",
-                    metadataHeaders=["From", "Subject"],
-                ).execute()
-            except Exception as e:
-                warnings.append(f"[fetcher/{label}] failed to fetch metadata for {msg_id}: {e}")
+        filter_skipped = 0
+        matched_ids: list[str] = []
+        headers_by_id: dict[str, tuple[str, str]] = {}
+        for msg_id in msg_ids:
+            meta = metadata_responses.get(msg_id)
+            if meta is None:
                 continue
 
             headers = {
@@ -371,13 +520,20 @@ def _process_gmail_source(
                 filter_skipped += 1
                 continue
 
-            try:
-                full_msg = service.users().messages().get(
-                    userId="me", id=msg_id, format="full",
-                ).execute()
-            except Exception as e:
-                warnings.append(f"[fetcher/{label}] failed to fetch message {msg_id}: {e}")
+            matched_ids.append(msg_id)
+            headers_by_id[msg_id] = (from_header, subject_header)
+
+        full_responses, full_errors = _batched_get(
+            service, matched_ids, f"{label} message fetch", format="full",
+        )
+        for msg_id, e in full_errors.items():
+            warnings.append(f"[fetcher/{label}] failed to fetch message {msg_id}: {e}")
+
+        for msg_id in matched_ids:
+            full_msg = full_responses.get(msg_id)
+            if full_msg is None:
                 continue
+            from_header, subject_header = headers_by_id[msg_id]
 
             pdf_parts = _find_pdf_parts(full_msg.get("payload", {}))
 
@@ -402,9 +558,11 @@ def _process_gmail_source(
 
                 if attachment_id:
                     try:
-                        att = service.users().messages().attachments().get(
-                            userId="me", messageId=msg_id, id=attachment_id,
-                        ).execute()
+                        att = _call_with_retry(
+                            lambda msg_id=msg_id, attachment_id=attachment_id: service.users().messages()
+                            .attachments().get(userId="me", messageId=msg_id, id=attachment_id).execute(),
+                            f"{label} attachment fetch",
+                        )
                         raw_data = att.get("data", "")
                     except Exception as e:
                         warnings.append(

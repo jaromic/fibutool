@@ -191,6 +191,15 @@ One pass per configured filesystem source.
 - All console output is mirrored to a timestamped log file.
 - A summary of downloaded files and warnings is printed at the end.
 
+### Gmail API retry and batching
+
+- **F1.9** Per-message `messages.get` calls (metadata and full-message fetches) are issued via the Gmail batch API in groups of up to 50, cutting round-trips from one-per-message to one-per-batch.
+- **F1.10** Gmail API errors are classified on each call (batched or not):
+  - **Quota** (`403 rateLimitExceeded` / `userRateLimitExceeded` / `quotaExceeded`, or `429`): the `Total Query Cost` limit is a fixed per-minute bucket, so retries wait a fixed 60 seconds (not exponential) for up to 3 attempts.
+  - **Transient** (`500` / `502` / `503`): retried with exponential backoff (1s, 2s, 4s, 8s, 16s).
+  - Any other error is not retried.
+- **F1.11** When retries for a call (or, for a batch, the subset of messages still failing) are exhausted, fetcher prompts interactively: **[a]bort** exits the fetcher run immediately; **[r]etry** resets the backoff and tries again; **[c]ontinue** records the failure as a warning and proceeds, matching today's skip-and-continue behaviour. On EOF (no TTY, e.g. unattended runs) the prompt defaults to abort.
+
 ---
 
 ## Known gaps

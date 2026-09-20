@@ -28,7 +28,7 @@ except ImportError:
 
 import yaml
 
-from shared import default_config_path, setup_logging
+from shared import default_config_path, prompt_arc, setup_logging
 
 
 def _parse_args() -> argparse.Namespace:
@@ -75,25 +75,6 @@ def _prompt_manual_journal_state() -> int:
             print("  Invalid last receipt number — please enter an integer.")
 
     return last_receipt_number
-
-
-def _prompt_arc(stage: str, non_interactive: bool = False) -> str:
-    """Prompt the user for abort / retry / continue after a stage failure."""
-    if non_interactive:
-        print(f"\n[{stage}] failed. Non-interactive mode — aborting.", file=sys.stderr)
-        return "abort"
-    while True:
-        try:
-            choice = input(f"\n[{stage}] failed. [a]bort / [r]etry / [c]ontinue? ").strip().lower()
-        except EOFError:
-            return "abort"
-        if choice in ("a", "abort"):
-            return "abort"
-        if choice in ("r", "retry"):
-            return "retry"
-        if choice in ("c", "continue"):
-            return "continue"
-        print("  Please enter 'a', 'r', or 'c'.")
 
 
 def _run_stage(label: str, fn, argv: list[str]) -> bool:
@@ -161,7 +142,7 @@ def main() -> None:
             break
         except Exception as e:
             print(f"\njournal_reader error: {e}", file=sys.stderr)
-            choice = _prompt_arc("journal read", non_interactive)
+            choice = prompt_arc("journal read", non_interactive)
             if choice == "abort":
                 sys.exit(1)
             elif choice == "retry":
@@ -214,7 +195,7 @@ def main() -> None:
     while True:
         if _run_stage("fetcher — downloading invoices", fetcher_main, fetcher_argv):
             break
-        choice = _prompt_arc("fetcher", non_interactive)
+        choice = prompt_arc("fetcher", non_interactive)
         if choice == "abort":
             sys.exit(1)
         elif choice == "continue":
@@ -233,7 +214,7 @@ def main() -> None:
     while True:
         if _run_stage("process — extract, match, merge, journal", process_main, process_argv):
             break
-        choice = _prompt_arc("fibutool", non_interactive)
+        choice = prompt_arc("fibutool", non_interactive)
         if choice == "abort":
             sys.exit(1)
         elif choice == "continue":
@@ -244,7 +225,7 @@ def main() -> None:
     while True:
         if _run_stage("journal updater — appending entries to Excel workbook", updater_main, base_argv):
             break
-        choice = _prompt_arc("journal updater", non_interactive)
+        choice = prompt_arc("journal updater", non_interactive)
         if choice == "abort":
             sys.exit(1)
         elif choice == "continue":

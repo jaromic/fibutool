@@ -15,6 +15,9 @@ import pytest
 from fetcher import (
     SeenRegistry,
     _authenticate_imap,
+    _batched_get,
+    _call_with_retry,
+    _error_kind,
     _fetched_name,
     _find_pdf_parts,
     _imap_date,
@@ -27,6 +30,21 @@ from fetcher import (
     _sha256_of_file,
     pl_load_fetcher_config,
 )
+
+try:
+    from googleapiclient.errors import HttpError
+except ImportError:  # pragma: no cover - exercised only if the dependency is missing
+    HttpError = None
+
+
+def _http_error(status: int, reason: str | None = None) -> "HttpError":
+    resp = MagicMock()
+    resp.status = status
+    if reason is not None:
+        content = json.dumps({"error": {"errors": [{"reason": reason}]}}).encode()
+    else:
+        content = b"{}"
+    return HttpError(resp, content)
 
 PDF_BYTES = b"%PDF-1.4 test content"
 PDF_B64 = base64.urlsafe_b64encode(PDF_BYTES).decode().rstrip("=")
@@ -241,11 +259,39 @@ def _make_source(tmp_path: Path, **overrides) -> dict:
     return base
 
 
-def _make_service(messages: list[dict], attachments: dict | None = None) -> MagicMock:
+class _FakeBatch:
+    """Stand-in for googleapiclient's BatchHttpRequest: executes each added
+    request immediately (via its mocked .execute()) and invokes callbacks."""
+
+    def __init__(self):
+        self._entries = []
+
+    def add(self, request, callback=None, request_id=None):
+        self._entries.append((request, callback, request_id))
+
+    def execute(self):
+        for request, callback, request_id in self._entries:
+            try:
+                response, exception = request.execute(), None
+            except Exception as e:
+                response, exception = None, e
+            if callback:
+                callback(request_id, response, exception)
+
+
+def _make_service(
+    messages: list[dict],
+    attachments: dict | None = None,
+    get_errors: dict | None = None,
+) -> MagicMock:
     """Build a minimal mock Gmail API service.
 
     messages: list of dicts with keys: id, from, subject, payload
     attachments: {attachmentId: {"data": base64_str}}
+    get_errors: {message_id: exception} for a persistent failure, or
+                {message_id: [exception, ...]} for a queue of failures after
+                which the id falls through to a normal successful response
+                (simulates recovery on retry).
     """
     service = MagicMock()
 
@@ -255,10 +301,19 @@ def _make_service(messages: list[dict], attachments: dict | None = None) -> Magi
     }
 
     messages_by_id = {m["id"]: m for m in messages}
+    get_errors = dict(get_errors or {})
 
     def get_side_effect(userId, id, format, metadataHeaders=None):
-        msg = messages_by_id.get(id, {})
         result = MagicMock()
+        err = get_errors.get(id)
+        if isinstance(err, list):
+            if err:
+                result.execute.side_effect = err.pop(0)
+                return result
+        elif err is not None:
+            result.execute.side_effect = err
+            return result
+        msg = messages_by_id.get(id, {})
         if format == "metadata":
             result.execute.return_value = {
                 "payload": {"headers": [
@@ -271,6 +326,7 @@ def _make_service(messages: list[dict], attachments: dict | None = None) -> Magi
         return result
 
     service.users.return_value.messages.return_value.get.side_effect = get_side_effect
+    service.new_batch_http_request.side_effect = lambda **kwargs: _FakeBatch()
 
     if attachments:
         def att_side_effect(userId, messageId, id):
@@ -451,6 +507,234 @@ class TestProcessGmailSource:
 
         assert saved == []
         assert any("failed to search" in w for w in warnings)
+
+    def test_recovers_from_quota_error_via_batch_retry(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        service = _make_service(
+            messages=[{
+                "id": "msg1", "from": "billing@supplier.com", "subject": "Rechnung",
+                "payload": {
+                    "mimeType": "application/pdf", "filename": "invoice.pdf",
+                    "body": {"attachmentId": "att1"},
+                },
+            }],
+            attachments={"att1": {"data": PDF_B64}},
+            get_errors={"msg1": [_http_error(403, "rateLimitExceeded")]},
+        )
+
+        with patch("fetcher._authenticate_gmail", return_value=service), \
+             patch("fetcher.time_module.sleep") as mock_sleep:
+            saved, warnings = _process_gmail_source(
+                _make_source(tmp_path), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        assert saved == ["invoice_fetched.pdf"]
+        assert warnings == []
+        mock_sleep.assert_called_once_with(60)  # fixed per-minute window, not exponential
+
+    def test_non_retryable_error_recorded_as_warning_without_retry(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        service = _make_service(
+            messages=[{"id": "msg1", "from": "b@s.com", "subject": "Invoice", "payload": {}}],
+            get_errors={"msg1": _http_error(403, "insufficientPermissions")},
+        )
+
+        with patch("fetcher._authenticate_gmail", return_value=service), \
+             patch("fetcher.time_module.sleep") as mock_sleep:
+            saved, warnings = _process_gmail_source(
+                _make_source(tmp_path), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        assert saved == []
+        assert any("failed to fetch metadata for msg1" in w for w in warnings)
+        mock_sleep.assert_not_called()
+
+    def test_quota_exhaustion_continue_records_warning_and_keeps_going(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        service = _make_service(
+            messages=[
+                {"id": "msg1", "from": "b@s.com", "subject": "Rechnung", "payload": {}},
+                {
+                    "id": "msg2", "from": "b@s.com", "subject": "Rechnung",
+                    "payload": {
+                        "mimeType": "application/pdf", "filename": "inv2.pdf",
+                        "body": {"attachmentId": "att2"},
+                    },
+                },
+            ],
+            attachments={"att2": {"data": PDF_B64}},
+            get_errors={"msg1": _http_error(403, "rateLimitExceeded")},
+        )
+
+        with patch("fetcher._authenticate_gmail", return_value=service), \
+             patch("fetcher.time_module.sleep"), \
+             patch("fetcher.prompt_arc", return_value="continue") as mock_prompt:
+            saved, warnings = _process_gmail_source(
+                _make_source(tmp_path), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        assert saved == ["inv2_fetched.pdf"]
+        assert any("failed to fetch metadata for msg1" in w for w in warnings)
+        mock_prompt.assert_called_once()
+
+    def test_quota_exhaustion_abort_exits(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        service = _make_service(
+            messages=[{"id": "msg1", "from": "b@s.com", "subject": "Rechnung", "payload": {}}],
+            get_errors={"msg1": _http_error(403, "rateLimitExceeded")},
+        )
+
+        with patch("fetcher._authenticate_gmail", return_value=service), \
+             patch("fetcher.time_module.sleep"), \
+             patch("fetcher.prompt_arc", return_value="abort"):
+            with pytest.raises(SystemExit) as exc_info:
+                _process_gmail_source(
+                    _make_source(tmp_path), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+                )
+
+        assert exc_info.value.code == 1
+
+    def test_quota_exhaustion_retry_resets_and_succeeds(self, tmp_path):
+        invoices_dir = tmp_path / "invoices"
+        invoices_dir.mkdir()
+        seen = SeenRegistry(tmp_path / "seen.json")
+
+        # Fails all 3 scheduled attempts, then once more after the user picks
+        # "retry" at the ARC prompt, then finally succeeds.
+        service = _make_service(
+            messages=[{
+                "id": "msg1", "from": "b@s.com", "subject": "Rechnung",
+                "payload": {
+                    "mimeType": "application/pdf", "filename": "inv.pdf",
+                    "body": {"attachmentId": "att1"},
+                },
+            }],
+            attachments={"att1": {"data": PDF_B64}},
+            get_errors={"msg1": [_http_error(403, "rateLimitExceeded")] * 4},
+        )
+
+        with patch("fetcher._authenticate_gmail", return_value=service), \
+             patch("fetcher.time_module.sleep"), \
+             patch("fetcher.prompt_arc", return_value="retry") as mock_prompt:
+            saved, warnings = _process_gmail_source(
+                _make_source(tmp_path), date(2026, 1, 1), invoices_dir, seen, dry_run=False
+            )
+
+        assert saved == ["inv_fetched.pdf"]
+        assert warnings == []
+        mock_prompt.assert_called_once()
+
+
+# ── _error_kind / _call_with_retry / _batched_get ──────────────────────────────
+
+class TestErrorKind:
+    def test_403_rate_limit_exceeded_is_quota(self):
+        assert _error_kind(_http_error(403, "rateLimitExceeded")) == "quota"
+
+    def test_403_user_rate_limit_exceeded_is_quota(self):
+        assert _error_kind(_http_error(403, "userRateLimitExceeded")) == "quota"
+
+    def test_403_quota_exceeded_is_quota(self):
+        assert _error_kind(_http_error(403, "quotaExceeded")) == "quota"
+
+    def test_429_is_quota(self):
+        assert _error_kind(_http_error(429)) == "quota"
+
+    def test_403_insufficient_permissions_is_not_retryable(self):
+        assert _error_kind(_http_error(403, "insufficientPermissions")) is None
+
+    def test_500_is_transient(self):
+        assert _error_kind(_http_error(500)) == "transient"
+
+    def test_503_is_transient(self):
+        assert _error_kind(_http_error(503)) == "transient"
+
+    def test_404_is_not_retryable(self):
+        assert _error_kind(_http_error(404)) is None
+
+    def test_generic_exception_is_not_retryable(self):
+        assert _error_kind(ValueError("boom")) is None
+
+
+class TestCallWithRetry:
+    def test_returns_value_on_success(self):
+        assert _call_with_retry(lambda: 42, "label") == 42
+
+    def test_non_retryable_error_raises_immediately(self):
+        with patch("fetcher.time_module.sleep") as mock_sleep:
+            with pytest.raises(ValueError):
+                _call_with_retry(lambda: (_ for _ in ()).throw(ValueError("boom")), "label")
+        mock_sleep.assert_not_called()
+
+    def test_transient_error_uses_exponential_backoff_then_succeeds(self):
+        calls = {"n": 0}
+
+        def flaky():
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise _http_error(503)
+            return "ok"
+
+        with patch("fetcher.time_module.sleep") as mock_sleep:
+            assert _call_with_retry(flaky, "label") == "ok"
+        assert mock_sleep.call_args_list == [call(1), call(2)]
+
+    def test_quota_exhaustion_prompts_and_continue_reraises(self):
+        with patch("fetcher.time_module.sleep"), \
+             patch("fetcher.prompt_arc", return_value="continue") as mock_prompt:
+            with pytest.raises(HttpError):
+                _call_with_retry(
+                    lambda: (_ for _ in ()).throw(_http_error(403, "rateLimitExceeded")), "label"
+                )
+        mock_prompt.assert_called_once()
+
+
+class TestBatchedGet:
+    def test_all_succeed(self, tmp_path):
+        service = _make_service(messages=[
+            {"id": "m1", "from": "a@b.com", "subject": "s1", "payload": {}},
+            {"id": "m2", "from": "a@b.com", "subject": "s2", "payload": {}},
+        ])
+        responses, errors = _batched_get(service, ["m1", "m2"], "label", format="metadata")
+        assert set(responses) == {"m1", "m2"}
+        assert errors == {}
+
+    def test_mixed_success_and_non_retryable_failure(self, tmp_path):
+        service = _make_service(
+            messages=[
+                {"id": "m1", "from": "a@b.com", "subject": "s1", "payload": {}},
+                {"id": "m2", "from": "a@b.com", "subject": "s2", "payload": {}},
+            ],
+            get_errors={"m2": _http_error(404)},
+        )
+        with patch("fetcher.time_module.sleep") as mock_sleep:
+            responses, errors = _batched_get(service, ["m1", "m2"], "label", format="metadata")
+        assert set(responses) == {"m1"}
+        assert set(errors) == {"m2"}
+        mock_sleep.assert_not_called()
+
+    def test_quota_error_retried_and_recovers(self, tmp_path):
+        service = _make_service(
+            messages=[{"id": "m1", "from": "a@b.com", "subject": "s1", "payload": {}}],
+            get_errors={"m1": [_http_error(429)]},
+        )
+        with patch("fetcher.time_module.sleep") as mock_sleep:
+            responses, errors = _batched_get(service, ["m1"], "label", format="metadata")
+        assert set(responses) == {"m1"}
+        assert errors == {}
+        mock_sleep.assert_called_once_with(60)
 
 
 # ── _sha256_of_file ───────────────────────────────────────────────────────────

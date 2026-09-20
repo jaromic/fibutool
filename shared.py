@@ -5,6 +5,29 @@ from datetime import datetime
 from pathlib import Path
 
 
+def prompt_arc(stage: str, non_interactive: bool = False) -> str:
+    """Prompt the user for abort / retry / continue after a failure.
+
+    Returns "abort" on EOF (no TTY available) so unattended runs fail safe
+    instead of hanging on input().
+    """
+    if non_interactive:
+        print(f"\n[{stage}] failed. Non-interactive mode — aborting.", file=sys.stderr)
+        return "abort"
+    while True:
+        try:
+            choice = input(f"\n[{stage}] failed. [a]bort / [r]etry / [c]ontinue? ").strip().lower()
+        except EOFError:
+            return "abort"
+        if choice in ("a", "abort"):
+            return "abort"
+        if choice in ("r", "retry"):
+            return "retry"
+        if choice in ("c", "continue"):
+            return "continue"
+        print("  Please enter 'a', 'r', or 'c'.")
+
+
 def default_config_path() -> Path:
     """Return the default config path: next to the EXE (frozen) or next to the script (dev)."""
     if getattr(sys, 'frozen', False):
